@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mouse Battery Monitor</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="header">
+        <div>
+          <p class="eyebrow">Windows HID</p>
+          <h1>Monitor do mouse</h1>
+          <p class="subtle">Conecte pelo Bluetooth, dongle USB ou cabo e selecione o dispositivo quando o Windows perguntar.</p>
+        </div>
+        <button id="connectButton" class="primary">Conectar mouse</button>
+      </section>
+
+      <section class="status-grid">
+        <article class="metric">
+          <span>Status</span>
+          <strong id="statusText">Aguardando conexão</strong>
+        </article>
+        <article class="metric">
+          <span>Bateria</span>
+          <strong id="batteryText">--</strong>
+        </article>
+        <article class="metric">
+          <span>Dispositivo</span>
+          <strong id="deviceText">--</strong>
+        </article>
+      </section>
+
+      <section class="actions">
+        <button id="probeButton" class="secondary">Atualizar bateria</button>
+        <button id="copyLogButton" class="secondary">Copiar diagnóstico</button>
+        <button id="clearLogButton" class="secondary">Limpar leituras</button>
+      </section>
+
+      <section class="panel">
+        <div class="panel-title">
+          <h2>Dispositivos encontrados</h2>
+          <p>Esta lista aparece quando o app recebe a mesma solicitação de seleção que o site faz.</p>
+        </div>
+        <div id="devicePicker" class="device-list empty">Nenhuma seleção pendente.</div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-title">
+          <h2>Leituras HID</h2>
+          <p>Use estes dados para diagnosticar a conexão com o mouse.</p>
+        </div>
+        <pre id="log" class="log"></pre>
+      </section>
+    </main>
+
+    <script src="./renderer.js"></script>
+  </body>
+</html>

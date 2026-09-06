@@ -1,0 +1,12 @@
+const { contextBridge, ipcRenderer } = require('electron');
+
+contextBridge.exposeInMainWorld('mouseBridge', {
+  onDeviceList: (callback) => {
+    ipcRenderer.on('hid-device-list', (_event, devices) => callback(devices));
+  },
+  chooseDevice: (deviceId) => ipcRenderer.invoke('choose-hid-device', deviceId),
+  cancelDeviceSelection: () => ipcRenderer.invoke('cancel-hid-selection'),
+  setTrayBattery: (text) => ipcRenderer.send('tray-battery', text),
+  notifyLowBattery: (battery) => ipcRenderer.send('low-battery-notification', battery),
+  onTrayConnect: (callback) => ipcRenderer.on('tray-connect', callback)
+});

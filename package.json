@@ -1,0 +1,35 @@
+{
+  "name": "mouse-battery-app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Windows companion app for reading Bluetooth/USB HID mouse battery information.",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win nsis"
+  },
+  "devDependencies": {
+    "electron": "^38.1.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.mousebatterymonitor.app",
+    "productName": "Mouse Battery Monitor",
+    "directories": {
+      "output": "../../outputs/mouse-battery-monitor"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  }
+}
