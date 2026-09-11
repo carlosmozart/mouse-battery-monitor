@@ -8,5 +8,7 @@ contextBridge.exposeInMainWorld('mouseBridge', {
   cancelDeviceSelection: () => ipcRenderer.invoke('cancel-hid-selection'),
   setTrayBattery: (text) => ipcRenderer.send('tray-battery', text),
   notifyLowBattery: (battery) => ipcRenderer.send('low-battery-notification', battery),
-  onTrayConnect: (callback) => ipcRenderer.on('tray-connect', callback)
+  onTrayConnect: (callback) => ipcRenderer.on('tray-connect', callback),
+  getStartWithWindows: () => ipcRenderer.invoke('get-start-with-windows'),
+  setStartWithWindows: (enabled) => ipcRenderer.invoke('set-start-with-windows', enabled)
 });

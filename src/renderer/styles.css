@@ -133,6 +133,28 @@ h2 {
   padding: 18px;
 }
 
+.preference {
+  align-items: flex-start;
+  cursor: pointer;
+  display: flex;
+  gap: 12px;
+}
+
+.preference input {
+  accent-color: #2563eb;
+  margin-top: 3px;
+}
+
+.preference span {
+  display: grid;
+  gap: 4px;
+}
+
+.preference small {
+  color: #667891;
+  font-size: 13px;
+}
+
 .panel-title {
   margin-bottom: 14px;
 }

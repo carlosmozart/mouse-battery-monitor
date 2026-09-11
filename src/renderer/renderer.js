@@ -7,6 +7,7 @@ const logNode = document.querySelector('#log');
 const probeButton = document.querySelector('#probeButton');
 const copyLogButton = document.querySelector('#copyLogButton');
 const clearLogButton = document.querySelector('#clearLogButton');
+const startWithWindows = document.querySelector('#startWithWindows');
 
 let activeDevice = null;
 let lastDeviceList = [];
@@ -311,6 +312,22 @@ copyLogButton.addEventListener('click', copyDiagnostics);
 clearLogButton.addEventListener('click', () => {
   logNode.textContent = '';
 });
+
+startWithWindows.addEventListener('change', async () => {
+  try {
+    startWithWindows.checked = await window.mouseBridge.setStartWithWindows(startWithWindows.checked);
+    log(startWithWindows.checked
+      ? 'Inicialização com o Windows ativada. O app começará oculto na bandeja.'
+      : 'Inicialização com o Windows desativada.');
+  } catch (error) {
+    startWithWindows.checked = !startWithWindows.checked;
+    log('Não foi possível alterar a inicialização com o Windows.', error.message);
+  }
+});
+
+window.mouseBridge.getStartWithWindows().then((enabled) => {
+  startWithWindows.checked = enabled;
+}).catch((error) => log('Não foi possível ler a preferência de inicialização.', error.message));
 
 listAuthorizedDevices().catch((error) => {
   log('Erro ao listar dispositivos já autorizados', error.message);

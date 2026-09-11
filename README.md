@@ -32,6 +32,8 @@ Depois de iniciado, o app permanece ativo na bandeja do Windows, perto do relóg
 - O tooltip do ícone mostra o último nível de bateria recebido.
 - Clique com o botão direito para abrir o monitor, conectar o mouse ou sair do app.
 
+Na seção de preferências, ative “Iniciar com o Windows e manter oculto” para que o monitor seja carregado automaticamente na bandeja, sem abrir a janela. O ícone da bandeja permite reabrir o monitor quando necessário.
+
 O nível também aparece em destaque dentro da janela. O app consulta a bateria automaticamente ao conectar e a cada 10 minutos.
 
 Quando a carga atingir 20%, o Windows exibirá um aviso. Um novo aviso será mostrado ao chegar a 10%, sem repetir notificações enquanto o nível permanecer no mesmo limite.

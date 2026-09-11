@@ -7,6 +7,7 @@ let pendingDeviceCallback = null;
 let pendingDevices = [];
 let tray;
 let isQuitting = false;
+const startsHidden = process.argv.includes('--hidden');
 
 function createTrayIcon() {
   // PNG RGBA gerado em memoria, com cantos transparentes.
@@ -87,8 +88,21 @@ function createWindow() {
 }
 
 function showWindow() {
+  if (!mainWindow) createWindow();
   mainWindow?.show();
   mainWindow?.focus();
+}
+
+function getStartWithWindows() {
+  return app.getLoginItemSettings().openAtLogin;
+}
+
+function setStartWithWindows(enabled) {
+  app.setLoginItemSettings({
+    openAtLogin: enabled,
+    args: ['--hidden']
+  });
+  return getStartWithWindows();
 }
 
 async function createTray() {
@@ -153,8 +167,15 @@ app.whenReady().then(async () => {
     }).show();
   });
 
-  createWindow();
+  ipcMain.handle('get-start-with-windows', () => getStartWithWindows());
+  ipcMain.handle('set-start-with-windows', (_event, enabled) => setStartWithWindows(Boolean(enabled)));
+
+  if (!startsHidden) createWindow();
   await createTray();
+  if (startsHidden) {
+    // A janela é criada sob demanda para que o início com o Windows permaneça realmente oculto.
+    mainWindow = null;
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
