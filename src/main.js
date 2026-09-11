@@ -102,7 +102,9 @@ function setStartWithWindows(enabled) {
     openAtLogin: enabled,
     args: ['--hidden']
   });
-  return getStartWithWindows();
+  // Retorna a intenção gravada para que a interface não dependa da leitura
+  // do estado do registro, que pode ser atrasada em modo de desenvolvimento.
+  return enabled;
 }
 
 async function createTray() {

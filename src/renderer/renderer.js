@@ -142,6 +142,7 @@ async function openDevice(device) {
 
   deviceText.textContent = activeDevice.productName || `${hex(activeDevice.vendorId)}:${hex(activeDevice.productId)}`;
   statusText.textContent = 'Conectado';
+  connectButton.textContent = 'Mouse conectado';
   batteryText.textContent = 'Aguardando pacote';
 
   log('Dispositivo conectado', describeDevice(activeDevice));
