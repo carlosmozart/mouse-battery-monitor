@@ -144,6 +144,7 @@ async function openDevice(device) {
   statusText.textContent = 'Conectado';
   connectButton.textContent = 'Mouse conectado';
   batteryText.textContent = 'Aguardando pacote';
+  window.mouseBridge.notifyMouseConnected();
 
   log('Dispositivo conectado', describeDevice(activeDevice));
 
@@ -318,7 +319,7 @@ startWithWindows.addEventListener('change', async () => {
   try {
     startWithWindows.checked = await window.mouseBridge.setStartWithWindows(startWithWindows.checked);
     log(startWithWindows.checked
-      ? 'Inicialização com o Windows ativada. O app começará oculto na bandeja.'
+      ? 'Inicialização com o Windows ativada. O app aguardará o mouse e então irá para a bandeja.'
       : 'Inicialização com o Windows desativada.');
   } catch (error) {
     startWithWindows.checked = !startWithWindows.checked;

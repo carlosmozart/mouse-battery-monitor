@@ -1,8 +1,44 @@
 :root {
-  color-scheme: light;
+  color-scheme: light dark;
   font-family: Inter, Segoe UI, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   background: #f5f7fb;
   color: #172033;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    background: #101826;
+    color: #e5edf8;
+  }
+
+  .eyebrow,
+  .subtle,
+  .panel-title p,
+  .metric span,
+  .preference small,
+  .device-list.empty,
+  .device-meta {
+    color: #aabbd1;
+  }
+
+  .metric,
+  .panel {
+    background: #182235;
+    border-color: #2d3c54;
+  }
+
+  .secondary {
+    background: #2a3950;
+    color: #e5edf8;
+  }
+
+  .secondary:hover {
+    background: #354966;
+  }
+
+  .device {
+    border-color: #34445d;
+  }
 }
 
 * {

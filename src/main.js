@@ -100,11 +100,9 @@ function getStartWithWindows() {
 function setStartWithWindows(enabled) {
   app.setLoginItemSettings({
     openAtLogin: enabled,
-    args: ['--hidden']
+    args: enabled ? ['--hidden'] : []
   });
-  // Retorna a intenção gravada para que a interface não dependa da leitura
-  // do estado do registro, que pode ser atrasada em modo de desenvolvimento.
-  return enabled;
+  return app.getLoginItemSettings().openAtLogin;
 }
 
 async function createTray() {
@@ -161,6 +159,13 @@ app.whenReady().then(async () => {
     tray?.setToolTip(`Mouse Battery Monitor: ${String(text).slice(0, 40)}`);
   });
 
+  // No início automático a janela fica visível enquanto o renderer reconecta
+  // o HID já autorizado. Só a ocultamos depois de uma conexão bem-sucedida;
+  // assim o monitor não vai para a bandeja antes de poder ler o mouse.
+  ipcMain.on('mouse-connected', () => {
+    if (startsHidden) mainWindow?.hide();
+  });
+
   ipcMain.on('low-battery-notification', (_event, battery) => {
     if (!Notification.isSupported()) return;
     new Notification({
@@ -172,12 +177,8 @@ app.whenReady().then(async () => {
   ipcMain.handle('get-start-with-windows', () => getStartWithWindows());
   ipcMain.handle('set-start-with-windows', (_event, enabled) => setStartWithWindows(Boolean(enabled)));
 
-  if (!startsHidden) createWindow();
+  createWindow();
   await createTray();
-  if (startsHidden) {
-    // A janela é criada sob demanda para que o início com o Windows permaneça realmente oculto.
-    mainWindow = null;
-  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
