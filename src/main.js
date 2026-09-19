@@ -1,4 +1,5 @@
 const { app, BrowserWindow, Menu, Notification, Tray, ipcMain, nativeImage, session } = require('electron');
+const fs = require('fs');
 const zlib = require('zlib');
 const path = require('path');
 
@@ -94,6 +95,8 @@ function showWindow() {
 }
 
 function getStartWithWindows() {
+  const savedSetting = readPreferences().startWithWindows;
+  if (typeof savedSetting === 'boolean') return savedSetting;
   return app.getLoginItemSettings().openAtLogin;
 }
 
@@ -102,7 +105,25 @@ function setStartWithWindows(enabled) {
     openAtLogin: enabled,
     args: enabled ? ['--hidden'] : []
   });
-  return app.getLoginItemSettings().openAtLogin;
+  savePreferences({ startWithWindows: enabled });
+  return enabled;
+}
+
+function getPreferencesPath() {
+  return path.join(app.getPath('userData'), 'preferences.json');
+}
+
+function readPreferences() {
+  try {
+    return JSON.parse(fs.readFileSync(getPreferencesPath(), 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+function savePreferences(preferences) {
+  const current = readPreferences();
+  fs.writeFileSync(getPreferencesPath(), JSON.stringify({ ...current, ...preferences }, null, 2));
 }
 
 async function createTray() {

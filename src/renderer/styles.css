@@ -5,42 +5,6 @@
   color: #172033;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    background: #101826;
-    color: #e5edf8;
-  }
-
-  .eyebrow,
-  .subtle,
-  .panel-title p,
-  .metric span,
-  .preference small,
-  .device-list.empty,
-  .device-meta {
-    color: #aabbd1;
-  }
-
-  .metric,
-  .panel {
-    background: #182235;
-    border-color: #2d3c54;
-  }
-
-  .secondary {
-    background: #2a3950;
-    color: #e5edf8;
-  }
-
-  .secondary:hover {
-    background: #354966;
-  }
-
-  .device {
-    border-color: #34445d;
-  }
-}
-
 * {
   box-sizing: border-box;
 }
@@ -261,5 +225,59 @@ h2 {
 
   .secondary {
     flex: 1;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    background: #0b1220;
+    color: #f1f5f9;
+  }
+
+  .eyebrow,
+  .subtle,
+  .panel-title p,
+  .metric span,
+  .preference small,
+  .device-list.empty,
+  .device-meta {
+    color: #b8c8de;
+  }
+
+  .metric,
+  .panel {
+    background: #172235;
+    border-color: #3a4d69;
+  }
+
+  .metric strong,
+  .panel h2,
+  .preference strong,
+  .device-name {
+    color: #f8fafc;
+  }
+
+  .secondary {
+    background: #32445f;
+    color: #f8fafc;
+  }
+
+  .secondary:hover {
+    background: #415876;
+  }
+
+  .device {
+    background: #111c2e;
+    border-color: #405575;
+  }
+
+  .preference input {
+    accent-color: #60a5fa;
+  }
+
+  .log {
+    background: #09111e;
+    border: 1px solid #31435e;
+    color: #dbeafe;
   }
 }
