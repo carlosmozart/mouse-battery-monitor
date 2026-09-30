@@ -40,10 +40,11 @@
 
       <section class="panel preferences">
         <label class="preference">
-          <input id="startWithWindows" type="checkbox" />
+          <input id="startWithWindows" type="checkbox" disabled aria-describedby="startupStatus" />
           <span>
             <strong>Iniciar com o Windows</strong>
             <small>Ao iniciar, o monitor espera conectar ao mouse e então fica disponível na bandeja.</small>
+            <small id="startupStatus" role="status">Verificando configuração do Windows...</small>
           </span>
         </label>
       </section>

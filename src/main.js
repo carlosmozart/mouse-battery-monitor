@@ -1,5 +1,4 @@
 const { app, BrowserWindow, Menu, Notification, Tray, ipcMain, nativeImage, session } = require('electron');
-const fs = require('fs');
 const zlib = require('zlib');
 const path = require('path');
 
@@ -8,7 +7,9 @@ let pendingDeviceCallback = null;
 let pendingDevices = [];
 let tray;
 let isQuitting = false;
-const startsHidden = process.argv.includes('--hidden');
+let hideAfterFirstConnection = process.argv.includes('--hidden');
+const hasInstanceLock = app.requestSingleInstanceLock();
+if (!hasInstanceLock) app.quit();
 
 function createTrayIcon() {
   // PNG RGBA gerado em memoria, com cantos transparentes.
@@ -74,7 +75,8 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      backgroundThrottling: false
     }
   });
 
@@ -89,41 +91,32 @@ function createWindow() {
 }
 
 function showWindow() {
+  // Uma abertura explícita cancela a ocultação automática pendente.
+  hideAfterFirstConnection = false;
   if (!mainWindow) createWindow();
+  if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow?.show();
   mainWindow?.focus();
 }
 
 function getStartWithWindows() {
-  const savedSetting = readPreferences().startWithWindows;
-  if (typeof savedSetting === 'boolean') return savedSetting;
-  return app.getLoginItemSettings().openAtLogin;
+  const settings = app.getLoginItemSettings(getLoginOptions());
+  return settings.openAtLogin && settings.executableWillLaunchAtLogin;
 }
 
 function setStartWithWindows(enabled) {
   app.setLoginItemSettings({
-    openAtLogin: enabled,
-    args: enabled ? ['--hidden'] : []
+    ...getLoginOptions(),
+    openAtLogin: enabled
   });
-  savePreferences({ startWithWindows: enabled });
-  return enabled;
+  return getStartWithWindows();
 }
 
-function getPreferencesPath() {
-  return path.join(app.getPath('userData'), 'preferences.json');
-}
-
-function readPreferences() {
-  try {
-    return JSON.parse(fs.readFileSync(getPreferencesPath(), 'utf8'));
-  } catch {
-    return {};
-  }
-}
-
-function savePreferences(preferences) {
-  const current = readPreferences();
-  fs.writeFileSync(getPreferencesPath(), JSON.stringify({ ...current, ...preferences }, null, 2));
+function getLoginOptions() {
+  return {
+    path: process.execPath,
+    args: app.isPackaged ? ['--hidden'] : [app.getAppPath(), '--hidden']
+  };
 }
 
 async function createTray() {
@@ -140,13 +133,19 @@ async function createTray() {
 
 }
 
-app.whenReady().then(async () => {
+if (hasInstanceLock) app.on('second-instance', () => {
+  if (app.isReady()) showWindow();
+  else hideAfterFirstConnection = false;
+});
+
+if (hasInstanceLock) app.whenReady().then(async () => {
   session.defaultSession.setDevicePermissionHandler(({ deviceType }) => {
     return deviceType === 'hid';
   });
 
   session.defaultSession.on('select-hid-device', (event, details, callback) => {
     event.preventDefault();
+    if (pendingDeviceCallback) pendingDeviceCallback('');
     pendingDeviceCallback = callback;
     pendingDevices = details.deviceList.map((device, index) => ({
       index,
@@ -161,7 +160,7 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle('choose-hid-device', (_event, deviceId) => {
-    if (!pendingDeviceCallback) return false;
+    if (!pendingDeviceCallback || !pendingDevices.some((device) => device.deviceId === deviceId)) return false;
     pendingDeviceCallback(deviceId);
     pendingDeviceCallback = null;
     pendingDevices = [];
@@ -183,8 +182,10 @@ app.whenReady().then(async () => {
   // No início automático a janela fica visível enquanto o renderer reconecta
   // o HID já autorizado. Só a ocultamos depois de uma conexão bem-sucedida;
   // assim o monitor não vai para a bandeja antes de poder ler o mouse.
-  ipcMain.on('mouse-connected', () => {
-    if (startsHidden) mainWindow?.hide();
+  ipcMain.on('mouse-connected', (event) => {
+    if (event.sender !== mainWindow?.webContents || !hideAfterFirstConnection) return;
+    hideAfterFirstConnection = false;
+    mainWindow.hide();
   });
 
   ipcMain.on('low-battery-notification', (_event, battery) => {
@@ -197,12 +198,13 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('get-start-with-windows', () => getStartWithWindows());
   ipcMain.handle('set-start-with-windows', (_event, enabled) => setStartWithWindows(Boolean(enabled)));
+  ipcMain.handle('get-app-version', () => app.getVersion());
 
   createWindow();
   await createTray();
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    showWindow();
   });
 });
 

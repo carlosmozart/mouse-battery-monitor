@@ -34,6 +34,18 @@ Depois de iniciado, o app permanece ativo na bandeja do Windows, perto do relóg
 
 Na seção de preferências, ative “Iniciar com o Windows”. No próximo login, o monitor abre e aguarda a conexão do mouse autorizado; depois de conectado, a janela é ocultada e o monitor permanece na bandeja. O ícone da bandeja permite reabrir o monitor quando necessário.
 
+A caixa reflete a configuração efetiva do Windows e é atualizada ao voltar para a janela. Se a inicialização tiver sido bloqueada no Gerenciador de Tarefas, reative o monitor em **Configurações → Aplicativos → Inicialização**. O arquivo de preferências de versões anteriores não é mais usado para indicar esse estado.
+
+A ocultação automática ocorre somente na primeira conexão do início automático. Reabrir o monitor cancela uma ocultação ainda pendente. Abrir o aplicativo novamente traz a instância existente para a frente.
+
 O nível também aparece em destaque dentro da janela. O app consulta a bateria automaticamente ao conectar e a cada 10 minutos.
 
-Quando a carga atingir 20%, o Windows exibirá um aviso. Um novo aviso será mostrado ao chegar a 10%, sem repetir notificações enquanto o nível permanecer no mesmo limite.
+Ao desconectar o dispositivo, o app limpa a bateria exibida e interrompe a consulta periódica. Ao reconectar, ele reavalia as interfaces disponíveis e prioriza a que permite consultar a bateria.
+
+Quando a carga atingir 20%, o Windows exibirá um aviso. Um novo aviso será mostrado ao chegar a 10%. Oscilações em torno desses limites não repetem o alerta; os avisos são rearmados quando a carga ultrapassa 25% ou ao reiniciar o app.
+
+O diagnóstico inclui a versão real do aplicativo. O histórico mantém as 200 entradas mais recentes, com limite de 2.000 caracteres por entrada.
+
+## Testes
+
+Execute `npm test` para verificar seleção de dispositivos, concorrência, desconexão/reconexão, alertas, inicialização e bandeja com simulações de WebHID e Electron. Esses testes não modificam a inicialização do Windows nem acessam o mouse físico.
