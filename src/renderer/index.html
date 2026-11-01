@@ -3,6 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'"
+    />
     <title>Mouse Battery Monitor</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
@@ -25,6 +29,7 @@
         <article class="metric">
           <span>Bateria</span>
           <strong id="batteryText">--</strong>
+          <small id="batteryDetail" class="metric-detail"></small>
         </article>
         <article class="metric">
           <span>Dispositivo</span>

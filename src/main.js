@@ -9,8 +9,20 @@ let tray;
 let trayLevelKey = 'null';
 let isQuitting = false;
 let hideAfterFirstConnection = process.argv.includes('--hidden');
+// Notificações sem referência podem ser coletadas e perder o evento de clique.
+const activeNotifications = new Set();
+const MAX_ACTIVE_NOTIFICATIONS = 5;
+// Igual a build.appId: o Windows associa as notificações ao atalho do instalador.
+const APP_USER_MODEL_ID = 'com.mousebatterymonitor.app';
+const AJAZZ_VENDOR_IDS = [0xa8a4, 0xa8a5];
+const AJAZZ_PRODUCT_ID = 0x2255;
 const hasInstanceLock = app.requestSingleInstanceLock();
 if (!hasInstanceLock) app.quit();
+if (process.platform === 'win32') app.setAppUserModelId(app.isPackaged ? APP_USER_MODEL_ID : process.execPath);
+
+function isTargetMouse(device) {
+  return AJAZZ_VENDOR_IDS.includes(device?.vendorId) && device?.productId === AJAZZ_PRODUCT_ID;
+}
 
 const TRAY_COLORS = {
   background: [37, 99, 235],
@@ -172,14 +184,35 @@ async function createTray() {
 
 }
 
+function showNotification(title, body) {
+  if (!Notification.isSupported()) return;
+  const notification = new Notification({ title, body });
+  const release = () => activeNotifications.delete(notification);
+  notification.on('click', () => { release(); showWindow(); });
+  notification.on('failed', release);
+  activeNotifications.add(notification);
+  // Mantém só as mais recentes; avisos antigos já foram substituídos por novos.
+  if (activeNotifications.size > MAX_ACTIVE_NOTIFICATIONS) {
+    activeNotifications.delete(activeNotifications.values().next().value);
+  }
+  notification.show();
+}
+
+// A janela só exibe a página local; links externos e novas janelas são bloqueados.
+app.on('web-contents-created', (_event, contents) => {
+  contents.on('will-navigate', (event) => event.preventDefault());
+  contents.setWindowOpenHandler(() => ({ action: 'deny' }));
+});
+
 if (hasInstanceLock) app.on('second-instance', () => {
   if (app.isReady()) showWindow();
   else hideAfterFirstConnection = false;
 });
 
 if (hasInstanceLock) app.whenReady().then(async () => {
-  session.defaultSession.setDevicePermissionHandler(({ deviceType }) => {
-    return deviceType === 'hid';
+  // Só o mouse monitorado mantém a permissão HID entre execuções.
+  session.defaultSession.setDevicePermissionHandler(({ deviceType, device }) => {
+    return deviceType === 'hid' && isTargetMouse(device);
   });
 
   session.defaultSession.on('select-hid-device', (event, details, callback) => {
@@ -233,19 +266,14 @@ if (hasInstanceLock) app.whenReady().then(async () => {
   });
 
   ipcMain.on('low-battery-notification', (_event, battery) => {
-    if (!Notification.isSupported()) return;
-    new Notification({
-      title: 'Bateria do mouse baixa',
-      body: `Seu AJAZZ AJ139 V2 MC está com ${Number(battery)}% de bateria. Conecte o cabo USB para recarregar.`
-    }).show();
+    showNotification(
+      'Bateria do mouse baixa',
+      `Seu AJAZZ AJ139 V2 MC está com ${Number(battery)}% de bateria. Conecte o cabo USB para recarregar.`
+    );
   });
 
   ipcMain.on('full-battery-notification', () => {
-    if (!Notification.isSupported()) return;
-    new Notification({
-      title: 'Mouse carregado',
-      body: 'Seu AJAZZ AJ139 V2 MC chegou a 100%. Você já pode desconectar o cabo USB.'
-    }).show();
+    showNotification('Mouse carregado', 'Seu AJAZZ AJ139 V2 MC chegou a 100%. Você já pode desconectar o cabo USB.');
   });
 
   // Durante a suspensão o mouse pode descarregar ou trocar de interface.

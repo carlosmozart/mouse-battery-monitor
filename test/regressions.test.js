@@ -82,15 +82,17 @@ function batteryReport(device, battery, charging) {
   return { device, reportId: 0, data: new DataView(bytes.buffer) };
 }
 
-async function main({ lock = true, hidden = true, packaged = true } = {}) {
+async function main({ lock = true, hidden = true, packaged = true, notifications = false } = {}) {
   const app = new EventEmitter();
   const ipcMain = new EventEmitter();
   const handlers = new Map();
   const windows = [];
   const trays = [];
   const powerMonitor = new EventEmitter();
+  const notices = [];
   const state = { openAtLogin: true, executableWillLaunchAtLogin: true, quits: 0 };
   Object.assign(app, {
+    setAppUserModelId(id) { state.appUserModelId = id; },
     requestSingleInstanceLock: () => lock,
     quit: () => { state.quits++; },
     isReady: () => true, whenReady: () => Promise.resolve(), isPackaged: packaged,
@@ -101,7 +103,7 @@ async function main({ lock = true, hidden = true, packaged = true } = {}) {
   ipcMain.handle = (name, callback) => handlers.set(name, callback);
   class BrowserWindow extends EventEmitter {
     constructor() { super(); this.webContents = { sent: [], send(name) { this.sent.push(name); } }; this.hides = 0; windows.push(this); }
-    loadFile() {} hide() { this.hides++; } show() {} focus() {} isMinimized() { return false; }
+    loadFile() {} hide() { this.hides++; } show() { this.shows = (this.shows ?? 0) + 1; } focus() {} isMinimized() { return false; }
   }
   class Tray extends EventEmitter {
     constructor(image) { super(); this.images = [image]; trays.push(this); }
@@ -109,19 +111,24 @@ async function main({ lock = true, hidden = true, packaged = true } = {}) {
     setImage(image) { this.images.push(image); }
   }
   const session = new EventEmitter();
-  session.setDevicePermissionHandler = () => {};
+  session.setDevicePermissionHandler = (handler) => { state.permissionHandler = handler; };
+  class Notification extends EventEmitter {
+    static isSupported() { return notifications; }
+    constructor(options) { super(); Object.assign(this, options); notices.push(this); }
+    show() { this.shown = true; }
+  }
   const nativeImage = { createEmpty: () => ({ representations: [], addRepresentation(rep) { this.representations.push(rep); } }) };
   const electron = { app, ipcMain, BrowserWindow, Tray, powerMonitor,
     session: { defaultSession: session }, nativeImage,
-    Menu: { buildFromTemplate: (items) => items }, Notification: { isSupported: () => false } };
+    Menu: { buildFromTemplate: (items) => items }, Notification };
   const context = vm.createContext({
     Buffer, console, __dirname: path.join(root, 'src'),
-    process: { argv: hidden ? ['app', '--hidden'] : ['app'], execPath: 'C:\\app\\monitor.exe' },
+    process: { argv: hidden ? ['app', '--hidden'] : ['app'], execPath: 'C:\\app\\monitor.exe', platform: 'win32' },
     require: (name) => name === 'electron' ? electron : require(name)
   });
   vm.runInContext(source('src/main.js'), context);
   await tick();
-  return { app, ipcMain, handlers, windows, trays, powerMonitor, state, context };
+  return { app, ipcMain, handlers, windows, trays, notices, powerMonitor, state, context };
 }
 
 test('seleção manual funciona com os metadados enviados pelo processo principal', async () => {
@@ -338,4 +345,54 @@ test('bandeja troca o ícone só quando o nível muda e retomada avisa o rendere
   assert.equal(tray.images.length, 3);
   powerMonitor.emit('resume');
   assert.deepEqual(windows[0].webContents.sent, ['power-resume']);
+});
+
+test('notificações usam o ID do instalador e o clique abre o monitor', async () => {
+  const packaged = await main({ notifications: true, hidden: false });
+  assert.equal(packaged.state.appUserModelId, require('../package.json').build.appId);
+  packaged.ipcMain.emit('low-battery-notification', {}, 15);
+  packaged.ipcMain.emit('full-battery-notification', {});
+  assert.deepEqual(packaged.notices.map((notice) => notice.title), ['Bateria do mouse baixa', 'Mouse carregado']);
+  assert.ok(packaged.notices.every((notice) => notice.shown));
+  packaged.notices[0].emit('click');
+  assert.equal(packaged.windows[0].shows, 1);
+  const dev = await main({ packaged: false });
+  assert.equal(dev.state.appUserModelId, 'C:\\app\\monitor.exe');
+  dev.ipcMain.emit('low-battery-notification', {}, 15);
+  assert.equal(dev.notices.length, 0);
+});
+
+test('permissão HID persiste só para o mouse monitorado', async () => {
+  const { state } = await main();
+  const allowed = (details) => state.permissionHandler(details);
+  assert.equal(allowed({ deviceType: 'hid', device: { vendorId: 0xa8a5, productId: 0x2255 } }), true);
+  assert.equal(allowed({ deviceType: 'hid', device: { vendorId: 0x046d, productId: 0xc52b } }), false);
+  assert.equal(allowed({ deviceType: 'usb', device: { vendorId: 0xa8a4, productId: 0x2255 } }), false);
+  assert.equal(allowed({ deviceType: 'hid' }), false);
+});
+
+test('janela não navega para fora nem abre novas janelas', async () => {
+  const { app } = await main();
+  const contents = new EventEmitter();
+  contents.setWindowOpenHandler = (handler) => { contents.openHandler = handler; };
+  app.emit('web-contents-created', {}, contents);
+  let prevented = false;
+  contents.emit('will-navigate', { preventDefault() { prevented = true; } });
+  assert.equal(prevented, true);
+  assert.equal(contents.openHandler({ url: 'https://example.com' }).action, 'deny');
+});
+
+test('janela mostra horário da leitura e mantém o último valor após desconectar', async () => {
+  const { context, state, hid, nodes, timeouts } = await renderer();
+  const detail = () => nodes.get('#batteryDetail').textContent;
+  const device = mouse(); state.devices = [device]; await context.listAuthorizedDevices();
+  assert.equal(detail(), '');
+  context.handleInputReport(batteryReport(device, 64, 0));
+  assert.match(detail(), /^Atualizado às \d{2}:\d{2}$/);
+  await context.requestBattery(); await runTimeouts(timeouts); await runTimeouts(timeouts);
+  assert.match(detail(), /^Última leitura: 64% às \d{2}:\d{2} · sem resposta agora$/);
+  assert.equal(nodes.get('#batteryText').textContent, '64%');
+  state.devices = []; device.opened = false; hid.emit('disconnect', { device }); await tick();
+  assert.equal(nodes.get('#batteryText').textContent, '--');
+  assert.match(detail(), /^Última leitura: 64% às \d{2}:\d{2}$/);
 });

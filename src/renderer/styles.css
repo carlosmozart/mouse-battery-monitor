@@ -129,6 +129,15 @@ h2 {
   overflow-wrap: anywhere;
 }
 
+.metric-detail {
+  color: #667891;
+  font-size: 13px;
+}
+
+.metric-detail:empty {
+  display: none;
+}
+
 .panel {
   padding: 18px;
 }
@@ -238,6 +247,7 @@ h2 {
   .subtle,
   .panel-title p,
   .metric span,
+  .metric-detail,
   .preference small,
   .device-list.empty,
   .device-meta {

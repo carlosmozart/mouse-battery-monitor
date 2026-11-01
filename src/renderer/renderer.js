@@ -1,6 +1,7 @@
 const connectButton = document.querySelector('#connectButton');
 const statusText = document.querySelector('#statusText');
 const batteryText = document.querySelector('#batteryText');
+const batteryDetail = document.querySelector('#batteryDetail');
 const deviceText = document.querySelector('#deviceText');
 const devicePicker = document.querySelector('#devicePicker');
 const logNode = document.querySelector('#log');
@@ -13,6 +14,8 @@ const startupStatus = document.querySelector('#startupStatus');
 let activeDevice = null;
 let lastDeviceList = [];
 let lastBattery = null;
+// Sobrevive à desconexão para mostrar o último valor conhecido.
+let lastBatteryReading = null;
 let lastCharging = null;
 let wasCharging = false;
 let fullChargeNotified = false;
@@ -36,6 +39,7 @@ const AJAZZ_VENDOR_IDS = [0xa8a4, 0xa8a5];
 const AJAZZ_PRODUCT_ID = 0x2255;
 
 const hex = (value, width = 4) => `0x${value.toString(16).padStart(width, '0')}`;
+const formatTime = (date) => date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 
 function isTargetMouse(device) {
   return AJAZZ_VENDOR_IDS.includes(device.vendorId) && device.productId === AJAZZ_PRODUCT_ID;
@@ -83,6 +87,7 @@ async function copyDiagnostics() {
     hidSupported: 'hid' in navigator,
     device: activeDevice ? describeDevice(activeDevice) : null,
     lastBattery,
+    lastBatteryReading,
     pendingDevices: lastDeviceList,
     log: logNode.textContent
   };
@@ -180,6 +185,13 @@ function applyBatteryLevel(battery, charging = null) {
   if (charging !== null) wasCharging = charging;
   lastBattery = battery;
   lastCharging = charging;
+  lastBatteryReading = { battery, time: new Date() };
+  batteryDetail.textContent = `Atualizado às ${formatTime(lastBatteryReading.time)}`;
+}
+
+function describeLastReading() {
+  if (!lastBatteryReading) return '';
+  return `Última leitura: ${lastBatteryReading.battery}% às ${formatTime(lastBatteryReading.time)}`;
 }
 
 function clearBatteryResponseTimer() {
@@ -207,6 +219,7 @@ function clearConnection() {
   statusText.textContent = 'Aguardando conexão';
   connectButton.textContent = 'Conectar mouse';
   batteryText.textContent = '--';
+  batteryDetail.textContent = describeLastReading();
   deviceText.textContent = '--';
   window.mouseBridge.setTrayBattery('mouse desconectado');
   return previous;
@@ -311,6 +324,8 @@ async function requestBattery(attempt = 1) {
     if (lastBattery === null) {
       batteryText.textContent = 'Sem resposta';
       window.mouseBridge.setTrayBattery('sem resposta');
+    } else {
+      batteryDetail.textContent = `${describeLastReading()} · sem resposta agora`;
     }
   }, BATTERY_RESPONSE_TIMEOUT);
 }

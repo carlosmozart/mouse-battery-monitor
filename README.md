@@ -39,15 +39,19 @@ A caixa reflete a configuração efetiva do Windows e é atualizada ao voltar pa
 
 A ocultação automática ocorre somente na primeira conexão do início automático. Reabrir o monitor cancela uma ocultação ainda pendente. Abrir o aplicativo novamente traz a instância existente para a frente.
 
-O nível também aparece em destaque dentro da janela, com a indicação “carregando” quando o cabo está conectado. O app consulta a bateria automaticamente ao conectar, a cada 10 minutos e alguns segundos depois de o Windows voltar da suspensão.
+O nível também aparece em destaque dentro da janela, com a indicação “carregando” quando o cabo está conectado. O app consulta a bateria automaticamente ao conectar, a cada 10 minutos e alguns segundos depois de o Windows voltar da suspensão. Abaixo do nível aparece o horário da última leitura.
 
-Se o mouse não responder em 5 segundos (por exemplo, em repouso), a consulta é repetida uma vez. Sem resposta e sem leitura anterior, a janela mostra “Sem resposta”; mova o mouse e clique em `Atualizar bateria`.
+Se o mouse não responder em 5 segundos (por exemplo, em repouso), a consulta é repetida uma vez. Sem resposta e sem leitura anterior, a janela mostra “Sem resposta”; se já havia leitura, ela é mantida com a indicação “sem resposta agora”. Mova o mouse e clique em `Atualizar bateria`.
 
-Ao desconectar o dispositivo, o app limpa a bateria exibida e interrompe a consulta periódica. Ao reconectar, ele reavalia as interfaces disponíveis e prioriza a que permite consultar a bateria.
+Ao desconectar o dispositivo, o app limpa a bateria exibida, mostra o último valor lido e seu horário, e interrompe a consulta periódica. Ao reconectar, ele reavalia as interfaces disponíveis e prioriza a que permite consultar a bateria.
 
 Quando a carga atingir 20%, o Windows exibirá um aviso. Um novo aviso será mostrado ao chegar a 10%. Oscilações em torno desses limites não repetem o alerta; os avisos são rearmados quando a carga ultrapassa 25% ou ao reiniciar o app. Enquanto o mouse carrega, esses avisos não são exibidos.
 
 Ao chegar a 100% durante a carga, o Windows avisa uma vez que o cabo já pode ser desconectado. O aviso é rearmado quando a carga cai abaixo de 95%.
+
+Clicar em qualquer aviso abre o monitor. As notificações usam o mesmo identificador do instalador (`build.appId`), para aparecerem com o nome do app no Windows.
+
+A permissão HID lembrada entre execuções vale somente para o AJAZZ AJ139 V2 MC. A janela só carrega a página local do app: links externos, novas janelas e conteúdo remoto são bloqueados.
 
 O diagnóstico inclui a versão real do aplicativo. O histórico mantém as 200 entradas mais recentes, com limite de 2.000 caracteres por entrada.
 
