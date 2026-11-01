@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, Notification, Tray, ipcMain, nativeImage, session } = require('electron');
+const { app, BrowserWindow, Menu, Notification, Tray, ipcMain, nativeImage, powerMonitor, session } = require('electron');
 const zlib = require('zlib');
 const path = require('path');
 
@@ -6,33 +6,69 @@ let mainWindow;
 let pendingDeviceCallback = null;
 let pendingDevices = [];
 let tray;
+let trayLevelKey = 'null';
 let isQuitting = false;
 let hideAfterFirstConnection = process.argv.includes('--hidden');
 const hasInstanceLock = app.requestSingleInstanceLock();
 if (!hasInstanceLock) app.quit();
 
-function createTrayIcon() {
-  // PNG RGBA gerado em memoria, com cantos transparentes.
-  const size = 16;
+const TRAY_COLORS = {
+  background: [37, 99, 235],
+  body: [255, 255, 255],
+  high: [34, 197, 94],
+  medium: [245, 158, 11],
+  low: [239, 68, 68],
+  bolt: [15, 23, 42]
+};
+// Raio de carregamento na mesma grade de 16 unidades do desenho.
+const TRAY_BOLT = [[7.6, 3], [10, 3], [8.8, 7.2], [10, 7.2], [7, 13], [7.6, 9], [6, 9]];
+
+function insidePolygon(x, y, points) {
+  let inside = false;
+  for (let i = 0, j = points.length - 1; i < points.length; j = i, i += 1) {
+    const [xi, yi] = points[i];
+    const [xj, yj] = points[j];
+    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+function normalizeTrayLevel(level) {
+  const battery = level?.battery;
+  if (!Number.isInteger(battery) || battery < 0 || battery > 100) return null;
+  return { battery, charging: level.charging === true };
+}
+
+// Desenha em uma grade de 16 unidades para que cada resolução tenha o mesmo formato.
+// Sem nível conhecido, o interior da bateria fica vazio.
+function drawTrayIcon(size, level) {
   const pixels = Buffer.alloc(size * size * 4);
-  const putPixel = (x, y, r, g, b, a = 255) => {
-    const offset = (y * size + x) * 4;
-    pixels[offset] = r; pixels[offset + 1] = g; pixels[offset + 2] = b; pixels[offset + 3] = a;
-  };
+  const battery = level?.battery ?? null;
+  const fillColor = battery > 50 ? TRAY_COLORS.high : battery > 20 ? TRAY_COLORS.medium : TRAY_COLORS.low;
+  // O interior ocupa y 3..13; cargas acima de zero mostram ao menos uma unidade.
+  const fillTop = battery === null ? Infinity : 13 - Math.max(battery / 10, battery > 0 ? 1 : 0);
 
   for (let y = 0; y < size; y += 1) {
     for (let x = 0; x < size; x += 1) {
-      if ((x - 7.5) ** 2 + (y - 7.5) ** 2 <= 56) putPixel(x, y, 37, 99, 235);
+      const u = ((x + 0.5) * 16) / size;
+      const v = ((y + 0.5) * 16) / size;
+      let color = null;
+      if ((u - 8) ** 2 + (v - 8) ** 2 <= 56) color = TRAY_COLORS.background;
+      if ((u >= 5 && u < 11 && v >= 2 && v < 14) || (u >= 7 && u < 9 && v >= 1 && v < 2)) color = TRAY_COLORS.body;
+      if (u >= 6 && u < 10 && v >= 3 && v < 13) {
+        color = v >= fillTop ? fillColor : TRAY_COLORS.background;
+        if (level?.charging && insidePolygon(u, v, TRAY_BOLT)) color = TRAY_COLORS.bolt;
+      }
+      if (!color) continue;
+      const offset = (y * size + x) * 4;
+      pixels.set([...color, 255], offset);
     }
   }
-  for (let y = 2; y < 14; y += 1) {
-    for (let x = 5; x < 11; x += 1) putPixel(x, y, 255, 255, 255);
-  }
-  for (let x = 7; x < 9; x += 1) putPixel(x, 1, 255, 255, 255);
-  for (let y = 4; y < 12; y += 1) {
-    for (let x = 6; x < 10; x += 1) putPixel(x, y, 37, 99, 235);
-  }
+  return pixels;
+}
 
+function encodePng(size, pixels) {
+  // PNG RGBA gerado em memoria, com cantos transparentes.
   const crc32 = (buffer) => {
     let crc = 0xffffffff;
     for (const byte of buffer) {
@@ -55,15 +91,18 @@ function createTrayIcon() {
   ihdr[8] = 8; ihdr[9] = 6;
   const rows = Buffer.alloc(size * (size * 4 + 1));
   for (let y = 0; y < size; y += 1) { rows[y * (size * 4 + 1)] = 0; pixels.copy(rows, y * (size * 4 + 1) + 1, y * size * 4, (y + 1) * size * 4); }
-  return nativeImage.createFromBuffer(Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(rows)), chunk('IEND', Buffer.alloc(0))]));
+  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(rows)), chunk('IEND', Buffer.alloc(0))]);
 }
 
-function getTrayIcon() {
-  // O icone do executavel e ICO nativo e permanece visivel em temas claro e escuro.
-  return createTrayIcon();
+function createTrayIcon(level = null) {
+  // Uma representação por escala evita ícone borrado em telas com DPI alto.
+  const image = nativeImage.createEmpty();
+  for (const scaleFactor of [1, 1.25, 1.5, 2]) {
+    const size = Math.round(16 * scaleFactor);
+    image.addRepresentation({ scaleFactor, width: size, height: size, buffer: encodePng(size, drawTrayIcon(size, level)) });
+  }
+  return image;
 }
-
-const trayIcon = getTrayIcon();
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -120,7 +159,7 @@ function getLoginOptions() {
 }
 
 async function createTray() {
-  tray = new Tray(trayIcon);
+  tray = new Tray(createTrayIcon());
   tray.setIgnoreDoubleClickEvents(true);
   tray.setToolTip('Mouse Battery Monitor: aguardando bateria');
   tray.setContextMenu(Menu.buildFromTemplate([
@@ -175,8 +214,13 @@ if (hasInstanceLock) app.whenReady().then(async () => {
     return true;
   });
 
-  ipcMain.on('tray-battery', (_event, text) => {
+  ipcMain.on('tray-battery', (_event, text, level) => {
     tray?.setToolTip(`Mouse Battery Monitor: ${String(text).slice(0, 40)}`);
+    const normalized = normalizeTrayLevel(level);
+    const key = JSON.stringify(normalized);
+    if (!tray || key === trayLevelKey) return;
+    trayLevelKey = key;
+    tray.setImage(createTrayIcon(normalized));
   });
 
   // No início automático a janela fica visível enquanto o renderer reconecta
@@ -194,6 +238,19 @@ if (hasInstanceLock) app.whenReady().then(async () => {
       title: 'Bateria do mouse baixa',
       body: `Seu AJAZZ AJ139 V2 MC está com ${Number(battery)}% de bateria. Conecte o cabo USB para recarregar.`
     }).show();
+  });
+
+  ipcMain.on('full-battery-notification', () => {
+    if (!Notification.isSupported()) return;
+    new Notification({
+      title: 'Mouse carregado',
+      body: 'Seu AJAZZ AJ139 V2 MC chegou a 100%. Você já pode desconectar o cabo USB.'
+    }).show();
+  });
+
+  // Durante a suspensão o mouse pode descarregar ou trocar de interface.
+  powerMonitor.on('resume', () => {
+    mainWindow?.webContents.send('power-resume');
   });
 
   ipcMain.handle('get-start-with-windows', () => getStartWithWindows());

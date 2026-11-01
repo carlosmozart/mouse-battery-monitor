@@ -13,8 +13,13 @@ const startupStatus = document.querySelector('#startupStatus');
 let activeDevice = null;
 let lastDeviceList = [];
 let lastBattery = null;
+let lastCharging = null;
+let wasCharging = false;
+let fullChargeNotified = false;
 let lastBatteryAlertLevel = null;
 let batteryRefreshTimer = null;
+let batteryResponseTimer = null;
+let resumeTimer = null;
 let openingDevice = null;
 let connectionGeneration = 0;
 let connectionQueue = Promise.resolve();
@@ -23,6 +28,9 @@ let startupPreferenceBusy = false;
 const logEntries = [];
 const MAX_LOG_ENTRIES = 200;
 const MAX_LOG_ENTRY_LENGTH = 2000;
+const BATTERY_RESPONSE_TIMEOUT = 5000;
+const BATTERY_QUERY_ATTEMPTS = 2;
+const RESUME_REFRESH_DELAY = 3000;
 
 const AJAZZ_VENDOR_IDS = [0xa8a4, 0xa8a5];
 const AJAZZ_PRODUCT_ID = 0x2255;
@@ -146,19 +154,37 @@ function describeDevice(device) {
   };
 }
 
-function applyBatteryLevel(battery) {
+function applyBatteryLevel(battery, charging = null) {
   if (!Number.isInteger(battery) || battery < 0 || battery > 100) return;
-  batteryText.textContent = `${battery}%`;
-  window.mouseBridge.setTrayBattery(`${battery}%`);
+  clearBatteryResponseTimer();
+  // Pacotes sem indicador de carga mantêm o último estado conhecido.
+  charging = typeof charging === 'boolean' ? charging : lastCharging;
+  batteryText.textContent = charging ? `${battery}% · carregando` : `${battery}%`;
+  window.mouseBridge.setTrayBattery(charging ? `${battery}% (carregando)` : `${battery}%`, { battery, charging: charging === true });
 
   // Rearma os alertas somente após recuperar carga acima de 25%.
   if (battery > 25) lastBatteryAlertLevel = null;
   const alertLevel = battery <= 10 ? 10 : battery <= 20 ? 20 : null;
-  if (alertLevel !== null && (lastBatteryAlertLevel === null || alertLevel < lastBatteryAlertLevel)) {
+  // Com o cabo conectado o aviso para recarregar não faz sentido.
+  if (!charging && alertLevel !== null && (lastBatteryAlertLevel === null || alertLevel < lastBatteryAlertLevel)) {
     window.mouseBridge.notifyLowBattery(battery);
     lastBatteryAlertLevel = alertLevel;
   }
+
+  if (battery < 95) fullChargeNotified = false;
+  // O indicador pode ser limpo ao completar a carga, por isso vale também o estado anterior.
+  if (battery === 100 && (charging || wasCharging) && !fullChargeNotified) {
+    window.mouseBridge.notifyFullBattery();
+    fullChargeNotified = true;
+  }
+  if (charging !== null) wasCharging = charging;
   lastBattery = battery;
+  lastCharging = charging;
+}
+
+function clearBatteryResponseTimer() {
+  if (batteryResponseTimer) clearTimeout(batteryResponseTimer);
+  batteryResponseTimer = null;
 }
 
 function enqueueConnection(operation) {
@@ -173,8 +199,11 @@ function clearConnection() {
   previous?.removeEventListener('inputreport', handleInputReport);
   activeDevice = null;
   lastBattery = null;
+  lastCharging = null;
+  wasCharging = false;
   if (batteryRefreshTimer) clearInterval(batteryRefreshTimer);
   batteryRefreshTimer = null;
+  clearBatteryResponseTimer();
   statusText.textContent = 'Aguardando conexão';
   connectButton.textContent = 'Conectar mouse';
   batteryText.textContent = '--';
@@ -195,10 +224,10 @@ function handleInputReport(event) {
   if (event.device !== activeDevice) return;
   const bytes = [...new Uint8Array(event.data.buffer, event.data.byteOffset, event.data.byteLength)];
   log(`Relatório recebido: id ${event.reportId}`, bytes.map((byte) => hex(byte, 2)));
-  const battery = guessBatteryPercent(bytes);
-  if (battery !== null) {
-    applyBatteryLevel(battery);
-    log(`Bateria detectada: ${battery}%`);
+  const report = parseBatteryReport(bytes);
+  if (report) {
+    applyBatteryLevel(report.battery, report.charging);
+    log(`Bateria detectada: ${report.battery}%${report.charging ? ' (carregando)' : ''}`);
   }
 }
 
@@ -244,7 +273,7 @@ async function openDevice(device) {
   }
 }
 
-async function requestBattery() {
+async function requestBattery(attempt = 1) {
   const device = activeDevice;
   if (!device?.opened) {
     log('Conecte o AJAZZ antes de consultar a bateria.');
@@ -259,12 +288,31 @@ async function requestBattery() {
   // Comando usado pelo configurador oficial do AJ139 V2 MC.
   const payload = new Uint8Array(64);
   payload.set([0x55, 0x30, 0xa5, 0x0b, 0x2e, 0x01, 0x01]);
+  clearBatteryResponseTimer();
   try {
     await device.sendReport(0, payload);
     log('Consulta de bateria enviada.');
   } catch (error) {
     log('Falha ao consultar bateria', error.message);
+    return;
   }
+  if (activeDevice !== device) return;
+
+  // Em repouso o mouse pode ignorar a consulta; repete uma vez antes de desistir.
+  batteryResponseTimer = setTimeout(() => {
+    batteryResponseTimer = null;
+    if (activeDevice !== device || !device.opened) return;
+    if (attempt < BATTERY_QUERY_ATTEMPTS) {
+      log('Sem resposta da bateria. Repetindo consulta.');
+      void requestBattery(attempt + 1);
+      return;
+    }
+    log('O mouse não respondeu à consulta de bateria. Mova o mouse e clique em Atualizar bateria.');
+    if (lastBattery === null) {
+      batteryText.textContent = 'Sem resposta';
+      window.mouseBridge.setTrayBattery('sem resposta');
+    }
+  }, BATTERY_RESPONSE_TIMEOUT);
 }
 
 async function connect() {
@@ -340,25 +388,24 @@ async function probeFeatureReports(device) {
       const bytes = [...new Uint8Array(data.buffer, data.byteOffset, data.byteLength)];
       log(`Feature report ${reportId}`, bytes.map((byte) => hex(byte, 2)));
 
-      const guessedBattery = guessBatteryPercent(bytes);
-      if (guessedBattery !== null) {
-        applyBatteryLevel(guessedBattery);
-      }
+      const report = parseBatteryReport(bytes);
+      if (report) applyBatteryLevel(report.battery, report.charging);
     } catch (error) {
       log(`Não foi possível ler feature report ${reportId}`, error.message);
     }
   }
 }
 
-function guessBatteryPercent(bytes) {
+function parseBatteryReport(bytes) {
   // Resposta a consulta oficial: AA 30 A5 ... [bateria, carregando].
   if (bytes.length >= 10 && bytes[0] === 0xaa && bytes[1] === 0x30 && bytes[2] === 0xa5) {
-    return bytes[8] <= 100 ? bytes[8] : null;
+    return bytes[8] <= 100 ? { battery: bytes[8], charging: bytes[9] !== 0 } : null;
   }
 
   // Notificacao espontanea observada em algumas conexoes: AA FA ... D0 [bateria].
+  // Ela nao traz indicador de carga conhecido.
   if (bytes.length >= 10 && bytes[0] === 0xaa && bytes[1] === 0xfa && bytes[8] === 0xd0) {
-    return bytes[9] <= 100 ? bytes[9] : null;
+    return bytes[9] <= 100 ? { battery: bytes[9], charging: null } : null;
   }
 
   return null;
@@ -366,6 +413,16 @@ function guessBatteryPercent(bytes) {
 
 window.mouseBridge.onDeviceList(renderDevicePicker);
 window.mouseBridge.onTrayConnect(() => connect());
+window.mouseBridge.onPowerResume(() => {
+  // O mouse e o Bluetooth levam alguns segundos para voltar após a suspensão.
+  if (resumeTimer) clearTimeout(resumeTimer);
+  resumeTimer = setTimeout(() => {
+    resumeTimer = null;
+    log('Sistema retomado da suspensão. Atualizando bateria.');
+    if (activeDevice?.opened) void requestBattery();
+    else listAuthorizedDevices().catch((error) => log('Falha ao reconectar.', error.message));
+  }, RESUME_REFRESH_DELAY);
+});
 
 navigator.hid?.addEventListener('connect', async (event) => {
   if (!isTargetMouse(event.device)) return;
@@ -385,7 +442,7 @@ navigator.hid?.addEventListener('disconnect', (event) => {
   listAuthorizedDevices().catch((error) => log('Falha ao reconectar.', error.message));
 });
 connectButton.addEventListener('click', connect);
-probeButton.addEventListener('click', requestBattery);
+probeButton.addEventListener('click', () => requestBattery());
 copyLogButton.addEventListener('click', () => {
   copyDiagnostics().catch((error) => log('Falha ao copiar diagnóstico.', error.message));
 });

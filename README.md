@@ -29,6 +29,7 @@ Cole o diagnóstico na conversa para que possamos identificar:
 Depois de iniciado, o app permanece ativo na bandeja do Windows, perto do relógio. Ao fechar a janela, ele apenas fica oculto.
 
 - Clique no ícone azul para reabrir o monitor.
+- A bateria desenhada no ícone se preenche conforme a carga: verde acima de 50%, amarela até 21% e vermelha a partir de 20%. Um raio indica que o mouse está carregando.
 - O tooltip do ícone mostra o último nível de bateria recebido.
 - Clique com o botão direito para abrir o monitor, conectar o mouse ou sair do app.
 
@@ -38,11 +39,15 @@ A caixa reflete a configuração efetiva do Windows e é atualizada ao voltar pa
 
 A ocultação automática ocorre somente na primeira conexão do início automático. Reabrir o monitor cancela uma ocultação ainda pendente. Abrir o aplicativo novamente traz a instância existente para a frente.
 
-O nível também aparece em destaque dentro da janela. O app consulta a bateria automaticamente ao conectar e a cada 10 minutos.
+O nível também aparece em destaque dentro da janela, com a indicação “carregando” quando o cabo está conectado. O app consulta a bateria automaticamente ao conectar, a cada 10 minutos e alguns segundos depois de o Windows voltar da suspensão.
+
+Se o mouse não responder em 5 segundos (por exemplo, em repouso), a consulta é repetida uma vez. Sem resposta e sem leitura anterior, a janela mostra “Sem resposta”; mova o mouse e clique em `Atualizar bateria`.
 
 Ao desconectar o dispositivo, o app limpa a bateria exibida e interrompe a consulta periódica. Ao reconectar, ele reavalia as interfaces disponíveis e prioriza a que permite consultar a bateria.
 
-Quando a carga atingir 20%, o Windows exibirá um aviso. Um novo aviso será mostrado ao chegar a 10%. Oscilações em torno desses limites não repetem o alerta; os avisos são rearmados quando a carga ultrapassa 25% ou ao reiniciar o app.
+Quando a carga atingir 20%, o Windows exibirá um aviso. Um novo aviso será mostrado ao chegar a 10%. Oscilações em torno desses limites não repetem o alerta; os avisos são rearmados quando a carga ultrapassa 25% ou ao reiniciar o app. Enquanto o mouse carrega, esses avisos não são exibidos.
+
+Ao chegar a 100% durante a carga, o Windows avisa uma vez que o cabo já pode ser desconectado. O aviso é rearmado quando a carga cai abaixo de 95%.
 
 O diagnóstico inclui a versão real do aplicativo. O histórico mantém as 200 entradas mais recentes, com limite de 2.000 caracteres por entrada.
 

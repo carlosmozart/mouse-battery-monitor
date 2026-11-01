@@ -38,18 +38,21 @@ async function renderer() {
   const nodes = new Map();
   const hid = new EventEmitter();
   const window = new EventEmitter();
-  const state = { devices: [], alerts: [], connections: 0, tray: '', clipboard: '', enabled: false };
+  const state = { devices: [], alerts: [], full: 0, connections: 0, tray: '', trayLevel: null, clipboard: '', enabled: false };
   const timers = new Set();
+  const timeouts = new Set();
   hid.getDevices = async () => state.devices;
   hid.addEventListener = hid.on.bind(hid);
   window.addEventListener = window.on.bind(window);
   window.mouseBridge = {
     onDeviceList() {}, onTrayConnect() {},
+    onPowerResume(callback) { state.resume = callback; },
     getStartWithWindows: async () => state.enabled,
     setStartWithWindows: async () => state.enabled,
     getAppVersion: async () => require('../package.json').version,
-    setTrayBattery: (value) => { state.tray = value; },
+    setTrayBattery: (value, level = null) => { state.tray = value; state.trayLevel = level; },
     notifyLowBattery: (value) => state.alerts.push(value),
+    notifyFullBattery: () => { state.full++; },
     notifyMouseConnected: () => { state.connections++; }
   };
   const context = vm.createContext({
@@ -60,11 +63,23 @@ async function renderer() {
       createElement: element
     },
     setInterval(callback) { timers.add(callback); return callback; },
-    clearInterval(callback) { timers.delete(callback); }
+    clearInterval(callback) { timers.delete(callback); },
+    setTimeout(callback) { const id = { callback }; timeouts.add(id); return id; },
+    clearTimeout(id) { timeouts.delete(id); }
   });
   vm.runInContext(source('src/renderer/renderer.js'), context);
   await tick();
-  return { context, nodes, state, timers, hid, window };
+  return { context, nodes, state, timers, timeouts, hid, window };
+}
+
+async function runTimeouts(timeouts) {
+  for (const id of [...timeouts]) { timeouts.delete(id); id.callback(); }
+  await tick();
+}
+
+function batteryReport(device, battery, charging) {
+  const bytes = new Uint8Array([0xaa, 0x30, 0xa5, 0, 0, 0, 0, 0, battery, charging]);
+  return { device, reportId: 0, data: new DataView(bytes.buffer) };
 }
 
 async function main({ lock = true, hidden = true, packaged = true } = {}) {
@@ -72,6 +87,8 @@ async function main({ lock = true, hidden = true, packaged = true } = {}) {
   const ipcMain = new EventEmitter();
   const handlers = new Map();
   const windows = [];
+  const trays = [];
+  const powerMonitor = new EventEmitter();
   const state = { openAtLogin: true, executableWillLaunchAtLogin: true, quits: 0 };
   Object.assign(app, {
     requestSingleInstanceLock: () => lock,
@@ -83,14 +100,19 @@ async function main({ lock = true, hidden = true, packaged = true } = {}) {
   });
   ipcMain.handle = (name, callback) => handlers.set(name, callback);
   class BrowserWindow extends EventEmitter {
-    constructor() { super(); this.webContents = { send() {} }; this.hides = 0; windows.push(this); }
+    constructor() { super(); this.webContents = { sent: [], send(name) { this.sent.push(name); } }; this.hides = 0; windows.push(this); }
     loadFile() {} hide() { this.hides++; } show() {} focus() {} isMinimized() { return false; }
   }
-  class Tray extends EventEmitter { setIgnoreDoubleClickEvents() {} setToolTip() {} setContextMenu() {} }
+  class Tray extends EventEmitter {
+    constructor(image) { super(); this.images = [image]; trays.push(this); }
+    setIgnoreDoubleClickEvents() {} setToolTip(text) { this.tooltip = text; } setContextMenu() {}
+    setImage(image) { this.images.push(image); }
+  }
   const session = new EventEmitter();
   session.setDevicePermissionHandler = () => {};
-  const electron = { app, ipcMain, BrowserWindow, Tray,
-    session: { defaultSession: session }, nativeImage: { createFromBuffer() {} },
+  const nativeImage = { createEmpty: () => ({ representations: [], addRepresentation(rep) { this.representations.push(rep); } }) };
+  const electron = { app, ipcMain, BrowserWindow, Tray, powerMonitor,
+    session: { defaultSession: session }, nativeImage,
     Menu: { buildFromTemplate: (items) => items }, Notification: { isSupported: () => false } };
   const context = vm.createContext({
     Buffer, console, __dirname: path.join(root, 'src'),
@@ -99,7 +121,7 @@ async function main({ lock = true, hidden = true, packaged = true } = {}) {
   });
   vm.runInContext(source('src/main.js'), context);
   await tick();
-  return { app, ipcMain, handlers, windows, state, context };
+  return { app, ipcMain, handlers, windows, trays, powerMonitor, state, context };
 }
 
 test('seleção manual funciona com os metadados enviados pelo processo principal', async () => {
@@ -224,4 +246,96 @@ test('ocultação acontece uma única vez e abertura explícita cancela a espera
 test('segunda instância encerra antes de criar janela ou registrar IPC', async () => {
   const { windows, handlers, state } = await main({ lock: false });
   assert.equal(state.quits, 1); assert.equal(windows.length, 0); assert.equal(handlers.size, 0);
+});
+
+test('carregamento aparece na tela, suprime alerta baixo e avisa carga completa uma vez', async () => {
+  const { context, state, nodes } = await renderer();
+  const device = mouse(); state.devices = [device]; await context.listAuthorizedDevices();
+  context.handleInputReport(batteryReport(device, 15, 1));
+  assert.equal(nodes.get('#batteryText').textContent, '15% · carregando');
+  assert.equal(state.tray, '15% (carregando)');
+  assert.equal(JSON.stringify(state.trayLevel), JSON.stringify({ battery: 15, charging: true }));
+  assert.deepEqual(state.alerts, []);
+  [100, 100].forEach((battery) => context.handleInputReport(batteryReport(device, battery, 1)));
+  assert.equal(state.full, 1);
+  context.handleInputReport(batteryReport(device, 15, 0));
+  assert.deepEqual(state.alerts, [15]);
+});
+
+test('carga completa é avisada mesmo quando o indicador some em 100%', async () => {
+  const { context, state } = await renderer();
+  context.applyBatteryLevel(99, true); context.applyBatteryLevel(100, false);
+  assert.equal(state.full, 1);
+  context.applyBatteryLevel(100, false); assert.equal(state.full, 1);
+});
+
+test('pacote sem indicador de carga mantém o último estado', async () => {
+  const { context, state, nodes } = await renderer();
+  const device = mouse(); state.devices = [device]; await context.listAuthorizedDevices();
+  context.handleInputReport(batteryReport(device, 50, 1));
+  const bytes = new Uint8Array([0xaa, 0xfa, 0, 0, 0, 0, 0, 0, 0xd0, 51]);
+  context.handleInputReport({ device, reportId: 0, data: new DataView(bytes.buffer) });
+  assert.equal(nodes.get('#batteryText').textContent, '51% · carregando');
+});
+
+test('consulta sem resposta é repetida uma vez e depois mostra o aviso', async () => {
+  const { context, state, nodes, timeouts } = await renderer();
+  const device = mouse(); state.devices = [device]; await context.listAuthorizedDevices();
+  assert.equal(device.queries, 1); assert.equal(timeouts.size, 1);
+  await runTimeouts(timeouts); assert.equal(device.queries, 2);
+  await runTimeouts(timeouts); assert.equal(device.queries, 2);
+  assert.equal(nodes.get('#batteryText').textContent, 'Sem resposta');
+  assert.equal(state.tray, 'sem resposta');
+});
+
+test('resposta e desconexão cancelam a espera da consulta', async () => {
+  const { context, state, hid, timeouts } = await renderer();
+  const device = mouse(); state.devices = [device]; await context.listAuthorizedDevices();
+  context.handleInputReport(batteryReport(device, 60, 0)); assert.equal(timeouts.size, 0);
+  await context.requestBattery(); assert.equal(timeouts.size, 1);
+  state.devices = []; device.opened = false; hid.emit('disconnect', { device }); await tick();
+  assert.equal(timeouts.size, 0);
+});
+
+test('retomada da suspensão consulta a bateria ou reconecta o mouse', async () => {
+  const { context, state, timeouts } = await renderer();
+  const device = mouse(); state.devices = [device]; await context.listAuthorizedDevices();
+  context.handleInputReport(batteryReport(device, 60, 0));
+  state.resume(); state.resume(); assert.equal(timeouts.size, 1);
+  await runTimeouts(timeouts); assert.equal(device.queries, 2);
+
+  const idle = await renderer(); const sleeping = mouse(); idle.state.devices = [sleeping];
+  idle.state.resume(); await runTimeouts(idle.timeouts); await tick();
+  assert.equal(sleeping.opens, 1);
+});
+
+test('ícone da bandeja mostra nível, cor e carregamento', async () => {
+  const { context } = await main();
+  const pixel = (pixels, size, u, v) => {
+    const offset = (Math.floor((v * size) / 16) * size + Math.floor((u * size) / 16)) * 4;
+    return Array.from(pixels.subarray(offset, offset + 3));
+  };
+  const blue = [37, 99, 235];
+  const high = context.drawTrayIcon(32, { battery: 80, charging: false });
+  assert.deepEqual(pixel(high, 32, 6.2, 12.5), [34, 197, 94]);
+  assert.deepEqual(pixel(high, 32, 6.2, 3.2), blue);
+  const low = context.drawTrayIcon(32, { battery: 10, charging: false });
+  assert.deepEqual(pixel(low, 32, 6.2, 12.5), [239, 68, 68]);
+  assert.deepEqual(pixel(low, 32, 8, 8), blue);
+  assert.deepEqual(pixel(context.drawTrayIcon(32, { battery: 10, charging: true }), 32, 8, 8), [15, 23, 42]);
+  assert.deepEqual(pixel(context.drawTrayIcon(16, null), 16, 6.2, 12.5), blue);
+});
+
+test('bandeja troca o ícone só quando o nível muda e retomada avisa o renderer', async () => {
+  const { ipcMain, trays, windows, powerMonitor } = await main();
+  const [tray] = trays;
+  assert.equal(tray.images[0].representations.length, 4);
+  ipcMain.emit('tray-battery', {}, '80%', { battery: 80, charging: false });
+  ipcMain.emit('tray-battery', {}, '80%', { battery: 80, charging: false });
+  assert.equal(tray.images.length, 2); assert.equal(tray.tooltip, 'Mouse Battery Monitor: 80%');
+  ipcMain.emit('tray-battery', {}, 'mouse desconectado', null);
+  ipcMain.emit('tray-battery', {}, 'valor inválido', { battery: 400 });
+  assert.equal(tray.images.length, 3);
+  powerMonitor.emit('resume');
+  assert.deepEqual(windows[0].webContents.sent, ['power-resume']);
 });
