@@ -1,12 +1,13 @@
 {
   "name": "mouse-battery-app",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "description": "Windows companion app for reading Bluetooth/USB HID mouse battery information.",
   "main": "src/main.js",
   "scripts": {
     "test": "node --test",
     "start": "electron .",
+    "icon": "node scripts/generate-icon.js",
     "dist": "electron-builder --win nsis"
   },
   "devDependencies": {
@@ -24,7 +25,8 @@
       "package.json"
     ],
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "build/icon.ico"
     },
     "nsis": {
       "oneClick": false,

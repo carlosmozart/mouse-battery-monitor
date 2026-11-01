@@ -658,3 +658,49 @@ test('lista de seleção aparece com dispositivos e some ao cancelar', async () 
   assert.equal(card.hidden, true); assert.equal(state.cancelled, 1);
 });
 
+
+test('opções do sensor alteram só o seu bit e preservam os demais', async () => {
+  const { context, state, nodes } = await renderer();
+  const device = mouse(); state.devices = [device]; await context.listAuthorizedDevices(); await settle();
+  const toggles = nodes.get('#behaviorOptions').children.map((row) => row.children[0]);
+  const labels = nodes.get('#behaviorOptions').children.map((row) => row.children[1].children[0].textContent);
+  assert.deepEqual(labels, ['Motion Sync', 'Controle de ondulação', 'Correção de linha reta', 'Inverter a rolagem', 'Acordar ao mover']);
+  assert.deepEqual(toggles.map((toggle) => toggle.checked), [true, true, true, false, false]);
+
+  // Dois cliques seguidos: o segundo parte da configuração já gravada pelo primeiro.
+  toggles[0].checked = false; toggles[0].emit('change');
+  toggles[1].checked = false; toggles[1].emit('change');
+  await settle();
+  assert.equal(device.config.sensorFlag, 53 & ~32 & ~1);
+  assert.equal(nodes.get('#mouseSettingsStatus').textContent, 'Salvo no mouse: Controle de ondulação.');
+
+  toggles[3].checked = true; toggles[3].emit('change'); await settle();
+  assert.equal(device.config.scrollFlag, 1);
+  toggles[4].checked = true; toggles[4].emit('change'); await settle();
+  assert.equal(device.config.wakeupFlag, 0);
+  assert.equal(device.reports.filter((bytes) => bytes[1] === 0x0f).at(-1)[54], 0);
+  assert.equal(device.config.sensorFlag, 20);
+});
+
+test('validação dos campos de sensor, rolagem e despertar', async () => {
+  const { context } = await renderer();
+  const config = defaultMouseConfig();
+  assert.equal(context.validateMouseConfig({ ...config, sensorFlag: 255 }, ['sensorFlag']), null);
+  assert.match(context.validateMouseConfig({ ...config, sensorFlag: 256 }, ['sensorFlag']), /sensor/);
+  assert.match(context.validateMouseConfig({ ...config, scrollFlag: 2 }, ['scrollFlag']), /rolagem/);
+  assert.match(context.validateMouseConfig({ ...config, wakeupFlag: -1 }, ['wakeupFlag']), /despertar/);
+});
+
+test('ícone do app tem todos os tamanhos do Windows em PNG', () => {
+  const { ICON_SIZES, generateIcon } = require('../scripts/generate-icon.js');
+  const ico = generateIcon();
+  assert.equal(ico.readUInt16LE(2), 1);
+  assert.equal(ico.readUInt16LE(4), ICON_SIZES.length);
+  ICON_SIZES.forEach((size, index) => {
+    const entry = 6 + index * 16;
+    assert.equal(ico[entry] || 256, size);
+    const offset = ico.readUInt32LE(entry + 12);
+    assert.equal(ico.subarray(offset + 1, offset + 4).toString('ascii'), 'PNG');
+  });
+  assert.deepEqual(fs.readFileSync(path.join(root, 'build', 'icon.ico')), ico);
+});

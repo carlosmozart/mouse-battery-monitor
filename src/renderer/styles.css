@@ -513,6 +513,13 @@ summary:focus-visible {
   padding: 0 10px;
 }
 
+.option-grid {
+  display: grid;
+  gap: 10px 16px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  width: 100%;
+}
+
 /* Alertas e inicialização */
 
 .toggles {

@@ -31,6 +31,12 @@ const LIGHT_MODES = [
 const REPORT_RATES = [125, 250, 500, 1000];
 const SLEEP_MINUTES = [1, 3, 5, 10, 20, 30, 60];
 const LOD_HEIGHTS = [1, 2];
+// Bits de sensorFlag que o configurador oficial expõe; os demais são preservados.
+const SENSOR_OPTIONS = [
+  { bit: 32, label: 'Motion Sync', hint: 'Sincroniza a leitura do sensor com o envio ao computador.' },
+  { bit: 1, label: 'Controle de ondulação', hint: 'Reduz o tremido do sensor acima de 9.000 DPI.' },
+  { bit: 16, label: 'Correção de linha reta', hint: 'Endireita movimentos levemente inclinados.' }
+];
 
 // Valores de fábrica usados pelo configurador quando o mouse devolve a configuração vazia.
 const DEFAULT_MOUSE_CONFIG = {
@@ -129,7 +135,12 @@ const MOUSE_CONFIG_CHECKS = {
   lightMode: (mode) => (LIGHT_MODES.some((option) => option.value === mode) ? null : 'Modo de iluminação inválido.'),
   reportRate: (rate) => (Number.isInteger(rate) && rate >= 0 && rate < REPORT_RATES.length ? null : 'Taxa de polling inválida.'),
   lod: (lod) => (LOD_HEIGHTS.includes(lod) ? null : 'Altura de LOD inválida.'),
-  sleepMinutes: (minutes) => (SLEEP_MINUTES.includes(minutes) ? null : 'Tempo de repouso inválido.')
+  sleepMinutes: (minutes) => (SLEEP_MINUTES.includes(minutes) ? null : 'Tempo de repouso inválido.'),
+  sensorFlag: (flag) => (Number.isInteger(flag) && flag >= 0 && flag <= 0xff ? null : 'Opções do sensor inválidas.'),
+  // 1 inverte a direção da rolagem.
+  scrollFlag: (flag) => (flag === 0 || flag === 1 ? null : 'Direção da rolagem inválida.'),
+  // 0 liga o despertar ao mover o mouse; 1 desliga.
+  wakeupFlag: (flag) => (flag === 0 || flag === 1 ? null : 'Opção de despertar inválida.')
 };
 
 // Recusa valores fora do que o configurador oficial permite escolher. Só os campos

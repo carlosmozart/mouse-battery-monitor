@@ -24,6 +24,7 @@ const lightModeSelect = document.querySelector('#lightModeSelect');
 const reportRateSelect = document.querySelector('#reportRateSelect');
 const lodSelect = document.querySelector('#lodSelect');
 const sleepSelect = document.querySelector('#sleepSelect');
+const behaviorOptions = document.querySelector('#behaviorOptions');
 const lowAlertSelect = document.querySelector('#lowAlertSelect');
 const criticalAlertSelect = document.querySelector('#criticalAlertSelect');
 const refreshSelect = document.querySelector('#refreshSelect');
@@ -53,6 +54,7 @@ let pendingCommand = null;
 let settingsQueue = Promise.resolve();
 let dpiRadios = [];
 let dpiInputs = [];
+let behaviorInputs = [];
 const logEntries = [];
 const MAX_LOG_ENTRIES = 200;
 const MAX_LOG_ENTRY_LENGTH = 2000;
@@ -65,6 +67,27 @@ const LOW_ALERT_OPTIONS = [15, 20, 25, 30];
 const CRITICAL_ALERT_OPTIONS = [5, 10, 15];
 const REFRESH_OPTIONS = [5, 10, 15, 30, 60];
 const DEFAULT_PREFERENCES = { lowAlert: 20, criticalAlert: 10, refreshMinutes: 10, notifyFull: true };
+// Opções de liga/desliga do mouse; cada uma lê e altera só o seu campo da configuração.
+const BEHAVIOR_TOGGLES = [
+  ...SENSOR_OPTIONS.map((option) => ({
+    label: option.label,
+    hint: option.hint,
+    read: (config) => (config.sensorFlag & option.bit) !== 0,
+    changes: (config, checked) => ({ sensorFlag: checked ? config.sensorFlag | option.bit : config.sensorFlag & ~option.bit })
+  })),
+  {
+    label: 'Inverter a rolagem',
+    hint: 'Troca a direção da roda do mouse.',
+    read: (config) => config.scrollFlag === 1,
+    changes: (_config, checked) => ({ scrollFlag: checked ? 1 : 0 })
+  },
+  {
+    label: 'Acordar ao mover',
+    hint: 'Tira o mouse do repouso quando ele é movido.',
+    read: (config) => config.wakeupFlag === 0,
+    changes: (_config, checked) => ({ wakeupFlag: checked ? 0 : 1 })
+  }
+];
 
 const AJAZZ_VENDOR_IDS = [0xa8a4, 0xa8a5];
 const AJAZZ_PRODUCT_ID = 0x2255;
@@ -507,10 +530,12 @@ function sameSetting(a, b) {
 }
 
 // Grava só as mudanças pedidas sobre a configuração lida do mouse e confere lendo de novo.
-function saveMouseConfig(changes, description) {
+// `update` pode ser uma função: ela recebe a configuração atual quando chega a vez na fila.
+function saveMouseConfig(update, description) {
   const run = async () => {
     const device = activeDevice;
     if (!device || !mouseConfig) return false;
+    const changes = typeof update === 'function' ? update(mouseConfig) : update;
     const next = { ...mouseConfig, ...changes, dpis: [...(changes.dpis ?? mouseConfig.dpis)] };
     const error = validateMouseConfig(next, Object.keys(changes));
     if (error) {
@@ -604,8 +629,37 @@ function renderMouseSettings(message = '') {
   reportRateSelect.value = String(mouseConfig.reportRate);
   lodSelect.value = String(mouseConfig.lod);
   sleepSelect.value = String(mouseConfig.sleepMinutes);
+  behaviorInputs.forEach((input, index) => { input.checked = BEHAVIOR_TOGGLES[index].read(mouseConfig); });
   // Pelo cabo o mouse trabalha sempre a 1000 Hz; a taxa vale para o receptor 2.4G.
   reportRateSelect.disabled = connectionMode(activeDevice) === 'USB';
+}
+
+function buildBehaviorToggles() {
+  behaviorInputs = [];
+  behaviorOptions.replaceChildren(
+    ...BEHAVIOR_TOGGLES.map((toggle) => {
+      const row = document.createElement('label');
+      row.className = 'toggle';
+
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.addEventListener('change', () => {
+        const checked = input.checked;
+        void saveMouseConfig((config) => toggle.changes(config, checked), toggle.label);
+      });
+
+      const text = document.createElement('span');
+      const title = document.createElement('strong');
+      title.textContent = toggle.label;
+      const hint = document.createElement('small');
+      hint.textContent = toggle.hint;
+      text.append(title, hint);
+
+      behaviorInputs.push(input);
+      row.append(input, text);
+      return row;
+    })
+  );
 }
 
 function applyDpiValues() {
@@ -838,6 +892,7 @@ startWithWindows.addEventListener('change', async () => {
 });
 
 populateSelects();
+buildBehaviorToggles();
 renderPreferences();
 renderBatteryGauge(null, false);
 renderMouseSettings('Conecte o mouse para ver as configurações.');

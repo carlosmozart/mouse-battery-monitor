@@ -60,6 +60,7 @@ Ao conectar, o app lê o firmware e as configurações gravadas no mouse. Os com
 - **Taxa de polling:** 125, 250, 500 ou 1000 Hz pelo receptor 2.4G. Pelo cabo USB o mouse usa sempre 1000 Hz, e o campo fica bloqueado.
 - **Altura de LOD:** 1 mm ou 2 mm.
 - **Repouso após:** de 1 a 60 minutos sem uso.
+- **Sensor e uso:** Motion Sync, controle de ondulação (reduz o tremido acima de 9.000 DPI), correção de linha reta, inverter a rolagem e acordar ao mover. As três primeiras são bits de um mesmo campo do sensor; o app muda só o bit escolhido e preserva os outros.
 
 Cada alteração grava a configuração completa que o mouse informou, trocando só o campo escolhido, e depois lê de novo para conferir. Se a leitura não confirmar, a janela avisa. Valores fora dos limites acima não são enviados. Se o mouse não responder à leitura inicial, os controles ficam bloqueados até a próxima conexão.
 
@@ -69,6 +70,10 @@ A permissão HID lembrada entre execuções vale somente para o AJAZZ AJ139 V2 M
 
 O diagnóstico inclui a versão real do aplicativo. O histórico mantém as 200 entradas mais recentes, com limite de 2.000 caracteres por entrada.
 
+## Ícone e instalador
+
+O ícone do executável e do instalador fica em `build/icon.ico` e é gerado por `npm run icon` (script em `scripts/generate-icon.js`). Rode o script de novo depois de mudar o desenho. `npm run dist` gera o instalador.
+
 ## Testes
 
-Execute `npm test` para verificar seleção de dispositivos, concorrência, desconexão/reconexão, alertas, preferências, protocolo e gravação das configurações do mouse, inicialização e bandeja com simulações de WebHID e Electron. Esses testes não modificam a inicialização do Windows nem acessam o mouse físico.
+Execute `npm test` para verificar seleção de dispositivos, concorrência, desconexão/reconexão, alertas, preferências, protocolo e gravação das configurações do mouse, opções do sensor, ícone, inicialização e bandeja com simulações de WebHID e Electron. Esses testes não modificam a inicialização do Windows nem acessam o mouse físico.
