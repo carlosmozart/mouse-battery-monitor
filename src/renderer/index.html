@@ -12,65 +12,146 @@
   </head>
   <body>
     <main class="shell">
-      <section class="header">
-        <div>
-          <p class="eyebrow">Windows HID</p>
-          <h1>Monitor do mouse</h1>
-          <p class="subtle">Conecte pelo Bluetooth, dongle USB ou cabo e selecione o dispositivo quando o Windows perguntar.</p>
+      <header class="app-header">
+        <div class="brand">
+          <svg class="brand-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="6" y="2.5" width="12" height="19" rx="6" />
+            <path d="M12 2.5v6.5M6 9h12" />
+          </svg>
+          <div>
+            <h1>Mouse Battery Monitor</h1>
+            <p id="deviceText" class="subtle">Nenhum mouse conectado</p>
+          </div>
         </div>
-        <button id="connectButton" class="primary">Conectar mouse</button>
+        <div class="header-actions">
+          <span id="statusText" class="status-pill idle" role="status">Aguardando conexão</span>
+          <button id="connectButton" class="primary">Conectar mouse</button>
+        </div>
+      </header>
+
+      <section id="devicePickerCard" class="card picker" aria-labelledby="pickerTitle" hidden>
+        <div class="card-head">
+          <div>
+            <h2 id="pickerTitle">Escolha o mouse</h2>
+            <p class="subtle">Selecione o AJAZZ AJ139 V2 MC na lista de dispositivos HID.</p>
+          </div>
+          <button id="cancelPickerButton" class="ghost">Cancelar</button>
+        </div>
+        <div id="devicePicker" class="device-list"></div>
       </section>
 
-      <section class="status-grid">
-        <article class="metric">
-          <span>Status</span>
-          <strong id="statusText">Aguardando conexão</strong>
-        </article>
-        <article class="metric">
-          <span>Bateria</span>
-          <strong id="batteryText">--</strong>
+      <div class="layout">
+        <section class="card battery-card" aria-labelledby="batteryTitle">
+          <div class="card-head">
+            <h2 id="batteryTitle">Bateria</h2>
+            <button id="probeButton" class="ghost">Atualizar</button>
+          </div>
+          <div class="battery-gauge" aria-hidden="true">
+            <div class="battery-shell"><div id="batteryFill" class="battery-fill unknown"></div></div>
+            <span class="battery-cap"></span>
+          </div>
+          <div class="battery-reading">
+            <strong id="batteryText" class="battery-value">--</strong>
+            <span id="chargingBadge" class="badge" hidden>Carregando</span>
+          </div>
           <small id="batteryDetail" class="metric-detail"></small>
-        </article>
-        <article class="metric">
-          <span>Dispositivo</span>
-          <strong id="deviceText">--</strong>
-        </article>
-      </section>
+          <dl class="facts">
+            <div>
+              <dt>Conexão</dt>
+              <dd id="connectionText">--</dd>
+            </div>
+            <div>
+              <dt>Firmware</dt>
+              <dd id="firmwareText">--</dd>
+            </div>
+          </dl>
+        </section>
 
-      <section class="actions">
-        <button id="probeButton" class="secondary">Atualizar bateria</button>
-        <button id="copyLogButton" class="secondary">Copiar diagnóstico</button>
-        <button id="clearLogButton" class="secondary">Limpar leituras</button>
-      </section>
+        <section class="card" aria-labelledby="mouseTitle">
+          <div class="card-head">
+            <h2 id="mouseTitle">Configurações do mouse</h2>
+          </div>
+          <p id="mouseSettingsStatus" class="settings-status" role="status"></p>
+          <fieldset id="mouseSettings" class="mouse-settings" disabled>
+            <div class="setting">
+              <div class="setting-head">
+                <h3>DPI</h3>
+                <p class="subtle">Marque o nível ativo. Os valores vão de 50 a 24.000, em passos de 50.</p>
+              </div>
+              <div id="dpiLevels" class="dpi-levels"></div>
+              <button id="applyDpiButton" class="secondary">Aplicar valores de DPI</button>
+            </div>
+            <div class="field-grid">
+              <label class="field">
+                <span>Iluminação</span>
+                <select id="lightModeSelect"></select>
+              </label>
+              <label class="field">
+                <span>Taxa de polling</span>
+                <select id="reportRateSelect"></select>
+              </label>
+              <label class="field">
+                <span>Altura de LOD</span>
+                <select id="lodSelect"></select>
+              </label>
+              <label class="field">
+                <span>Repouso após</span>
+                <select id="sleepSelect"></select>
+              </label>
+            </div>
+          </fieldset>
+        </section>
+      </div>
 
-      <section class="panel preferences">
-        <label class="preference">
-          <input id="startWithWindows" type="checkbox" disabled aria-describedby="startupStatus" />
-          <span>
-            <strong>Iniciar com o Windows</strong>
-            <small>Ao iniciar, o monitor espera conectar ao mouse e então fica disponível na bandeja.</small>
-            <small id="startupStatus" role="status">Verificando configuração do Windows...</small>
-          </span>
-        </label>
-      </section>
-
-      <section class="panel">
-        <div class="panel-title">
-          <h2>Dispositivos encontrados</h2>
-          <p>Esta lista aparece quando o app recebe a mesma solicitação de seleção que o site faz.</p>
+      <section class="card" aria-labelledby="alertsTitle">
+        <div class="card-head">
+          <h2 id="alertsTitle">Alertas e inicialização</h2>
         </div>
-        <div id="devicePicker" class="device-list empty">Nenhuma seleção pendente.</div>
+        <div class="field-grid">
+          <label class="field">
+            <span>Aviso de bateria baixa</span>
+            <select id="lowAlertSelect"></select>
+          </label>
+          <label class="field">
+            <span>Aviso crítico</span>
+            <select id="criticalAlertSelect"></select>
+          </label>
+          <label class="field">
+            <span>Consultar a bateria a cada</span>
+            <select id="refreshSelect"></select>
+          </label>
+        </div>
+        <div class="toggles">
+          <label class="toggle">
+            <input id="notifyFullCheckbox" type="checkbox" />
+            <span>
+              <strong>Avisar quando a carga completar</strong>
+              <small>Mostra uma notificação ao chegar a 100% com o cabo conectado.</small>
+            </span>
+          </label>
+          <label class="toggle">
+            <input id="startWithWindows" type="checkbox" disabled aria-describedby="startupStatus" />
+            <span>
+              <strong>Iniciar com o Windows</strong>
+              <small>O monitor espera o mouse conectar e então fica na bandeja.</small>
+              <small id="startupStatus" role="status">Verificando configuração do Windows...</small>
+            </span>
+          </label>
+        </div>
       </section>
 
-      <section class="panel">
-        <div class="panel-title">
-          <h2>Leituras HID</h2>
-          <p>Use estes dados para diagnosticar a conexão com o mouse.</p>
+      <details class="card diagnostics">
+        <summary>Diagnóstico</summary>
+        <p class="subtle">Relatórios HID recebidos do mouse. Copie o diagnóstico para relatar problemas.</p>
+        <div class="actions">
+          <button id="copyLogButton" class="secondary">Copiar diagnóstico</button>
+          <button id="clearLogButton" class="secondary">Limpar leituras</button>
         </div>
         <pre id="log" class="log"></pre>
-      </section>
+      </details>
     </main>
 
+    <script src="./protocol.js"></script>
     <script src="./renderer.js"></script>
   </body>
 </html>

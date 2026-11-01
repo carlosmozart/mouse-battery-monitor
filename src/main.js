@@ -118,11 +118,12 @@ function createTrayIcon(level = null) {
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 980,
-    height: 720,
-    minWidth: 780,
-    minHeight: 560,
+    width: 1040,
+    height: 800,
+    minWidth: 480,
+    minHeight: 520,
     title: 'Mouse Battery Monitor',
+    autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,

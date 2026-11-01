@@ -12,29 +12,79 @@ const source = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 function element() {
   const node = new EventEmitter();
   return Object.assign(node, {
-    textContent: '', checked: false, disabled: false, children: [],
+    textContent: '', checked: false, disabled: false, hidden: false, value: '', children: [], style: {},
     addEventListener: node.on.bind(node),
+    setAttribute(name, value) { this[name] = value; },
     append(...children) { this.children.push(...children); },
     replaceChildren(...children) { this.children = children; }
   });
 }
 
-function mouse({ batteryInterface = true, name = 'AJAZZ', open } = {}) {
+const defaultMouseConfig = () => ({
+  lightMode: 2, reportRate: 3, dpiCount: 6, dpiIndex: 1, dpis: [400, 800, 1600, 2400, 3200, 6400],
+  scrollFlag: 0, lod: 1, sensorFlag: 53, keyRespond: 4, sleepMinutes: 10, highspeedMode: 0, wakeupFlag: 1
+});
+
+// Codificação independente da resposta de leitura, conforme o configurador oficial.
+function configResponse(config) {
+  const bytes = new Uint8Array(64);
+  bytes.set([0xaa, 0x0e, 0xa5, 0x0b, 0x2f, 0x01, 0x01]);
+  bytes[9] = config.lightMode; bytes[10] = config.reportRate + 1;
+  bytes[11] = config.dpiCount; bytes[12] = config.dpiIndex + 1;
+  config.dpis.forEach((dpi, i) => { bytes[13 + i * 2] = dpi & 0xff; bytes[14 + i * 2] = dpi >> 8; });
+  bytes[48] = config.scrollFlag; bytes[49] = config.lod; bytes[50] = config.sensorFlag;
+  bytes[51] = config.keyRespond; bytes[52] = config.sleepMinutes; bytes[53] = config.highspeedMode;
+  bytes[55] = config.wakeupFlag;
+  return bytes;
+}
+
+// Simula o mouse: responde a versão, leitura/gravação de configuração e modo de luz.
+function mouse({ batteryInterface = true, name = 'AJAZZ', open, vendorId = 0xa8a4, silent = false, ignoreWrites = false } = {}) {
   const device = new EventEmitter();
+  const reply = (bytes) => device.emit('inputreport', { device, reportId: 0, data: new DataView(bytes.buffer) });
   return Object.assign(device, {
-    vendorId: 0xa8a4, productId: 0x2255, productName: name,
-    opened: false, opens: 0, closes: 0, queries: 0,
+    vendorId, productId: 0x2255, productName: name,
+    opened: false, opens: 0, closes: 0, queries: 0, reports: [], config: defaultMouseConfig(),
     collections: [{ usagePage: 0xff01, usage: 0x10,
       outputReports: batteryInterface ? [{ reportId: 0 }] : [], featureReports: [] }],
     addEventListener: device.on.bind(device),
     removeEventListener: device.off.bind(device),
     async open() { this.opens++; if (open) await open(); this.opened = true; },
     async close() { this.closes++; this.opened = false; },
-    async sendReport() { this.queries++; }
+    async sendReport(reportId, data) {
+      const bytes = Array.from(data);
+      this.reports.push(bytes);
+      const code = bytes[1];
+      if (code === 0x30) { this.queries++; return; }
+      if (silent) return;
+      if (code === 0x03) {
+        const version = new Uint8Array(64); version.set([0xaa, 0x03]); version.set([0x31, 0x30, 0x34], 23);
+        reply(version);
+      } else if (code === 0x0e) {
+        reply(configResponse(this.config));
+      } else if (code === 0x0f) {
+        if (!ignoreWrites) {
+          this.config = {
+            lightMode: bytes[9], reportRate: bytes[10] - 1, dpiCount: bytes[11], dpiIndex: bytes[12] - 1,
+            dpis: [0, 1, 2, 3, 4, 5].map((i) => bytes[13 + i * 2] | (bytes[14 + i * 2] << 8)),
+            scrollFlag: bytes[48], lod: bytes[49], sensorFlag: bytes[50], keyRespond: bytes[51],
+            sleepMinutes: bytes[52], highspeedMode: bytes[53], wakeupFlag: bytes[54]
+          };
+        }
+        reply(new Uint8Array([0xaa, 0x0f, ...new Array(62).fill(0)]));
+      } else if (code === 0x21) {
+        if (!ignoreWrites) this.config.lightMode = bytes[10];
+        reply(new Uint8Array([0xaa, 0x21, ...new Array(62).fill(0)]));
+      }
+    }
   });
 }
 
-async function renderer() {
+async function settle() {
+  for (let i = 0; i < 10; i++) await tick();
+}
+
+async function renderer({ storage = {} } = {}) {
   const nodes = new Map();
   const hid = new EventEmitter();
   const window = new EventEmitter();
@@ -47,6 +97,7 @@ async function renderer() {
   window.mouseBridge = {
     onDeviceList() {}, onTrayConnect() {},
     onPowerResume(callback) { state.resume = callback; },
+    cancelDeviceSelection: async () => { state.cancelled = (state.cancelled ?? 0) + 1; return true; },
     getStartWithWindows: async () => state.enabled,
     setStartWithWindows: async () => state.enabled,
     getAppVersion: async () => require('../package.json').version,
@@ -57,6 +108,7 @@ async function renderer() {
   };
   const context = vm.createContext({
     console, window,
+    localStorage: { getItem: (key) => storage[key] ?? null, setItem: (key, value) => { storage[key] = value; } },
     navigator: { hid, clipboard: { writeText: async (value) => { state.clipboard = value; } } },
     document: {
       querySelector(id) { if (!nodes.has(id)) nodes.set(id, element()); return nodes.get(id); },
@@ -67,9 +119,10 @@ async function renderer() {
     setTimeout(callback) { const id = { callback }; timeouts.add(id); return id; },
     clearTimeout(id) { timeouts.delete(id); }
   });
+  vm.runInContext(source('src/renderer/protocol.js'), context);
   vm.runInContext(source('src/renderer/renderer.js'), context);
   await tick();
-  return { context, nodes, state, timers, timeouts, hid, window };
+  return { context, nodes, state, timers, timeouts, hid, window, storage };
 }
 
 async function runTimeouts(timeouts) {
@@ -154,6 +207,7 @@ test('desconexão limpa status, bateria, listener e temporizador; reconecta sem 
   await context.listAuthorizedDevices(); context.applyBatteryLevel(72);
   state.devices = []; device.opened = false; hid.emit('disconnect', { device }); await tick();
   assert.equal(nodes.get('#batteryText').textContent, '--');
+  assert.equal(nodes.get('#chargingBadge').hidden, true);
   assert.equal(nodes.get('#statusText').textContent, 'Aguardando conexão');
   assert.equal(state.tray, 'mouse desconectado');
   assert.equal(device.listenerCount('inputreport'), 0); assert.equal(timers.size, 0);
@@ -259,7 +313,8 @@ test('carregamento aparece na tela, suprime alerta baixo e avisa carga completa 
   const { context, state, nodes } = await renderer();
   const device = mouse(); state.devices = [device]; await context.listAuthorizedDevices();
   context.handleInputReport(batteryReport(device, 15, 1));
-  assert.equal(nodes.get('#batteryText').textContent, '15% · carregando');
+  assert.equal(nodes.get('#batteryText').textContent, '15%');
+  assert.equal(nodes.get('#chargingBadge').hidden, false);
   assert.equal(state.tray, '15% (carregando)');
   assert.equal(JSON.stringify(state.trayLevel), JSON.stringify({ battery: 15, charging: true }));
   assert.deepEqual(state.alerts, []);
@@ -282,7 +337,8 @@ test('pacote sem indicador de carga mantém o último estado', async () => {
   context.handleInputReport(batteryReport(device, 50, 1));
   const bytes = new Uint8Array([0xaa, 0xfa, 0, 0, 0, 0, 0, 0, 0xd0, 51]);
   context.handleInputReport({ device, reportId: 0, data: new DataView(bytes.buffer) });
-  assert.equal(nodes.get('#batteryText').textContent, '51% · carregando');
+  assert.equal(nodes.get('#batteryText').textContent, '51%');
+  assert.equal(nodes.get('#chargingBadge').hidden, false);
 });
 
 test('consulta sem resposta é repetida uma vez e depois mostra o aviso', async () => {
@@ -396,3 +452,163 @@ test('janela mostra horário da leitura e mantém o último valor após desconec
   assert.equal(nodes.get('#batteryText').textContent, '--');
   assert.match(detail(), /^Última leitura: 64% às \d{2}:\d{2}$/);
 });
+
+test('protocolo grava e lê a configuração nos bytes do configurador oficial', async () => {
+  const { context } = await renderer();
+  const config = defaultMouseConfig();
+  const payload = Array.from(context.writeConfigCommand(config));
+  assert.equal(payload.length, 64);
+  assert.deepEqual(payload.slice(0, 13), [0x55, 0x0f, 0xae, 0x0a, 0x2f, 1, 1, 0, 0, 2, 4, 6, 2]);
+  assert.deepEqual(payload.slice(13, 25), [0x90, 0x01, 0x20, 0x03, 0x40, 0x06, 0x60, 0x09, 0x80, 0x0c, 0x00, 0x19]);
+  assert.deepEqual(payload.slice(48, 56), [0, 1, 53, 4, 10, 0, 1, 0]);
+  const parsed = context.parseMouseConfig(Array.from(configResponse(config)));
+  assert.equal(JSON.stringify(parsed), JSON.stringify(config));
+  assert.equal(context.parseMouseConfig(new Array(64).fill(0xff)).factoryDefaults, true);
+  assert.deepEqual(Array.from(context.lightModeCommand(5)).slice(0, 11), [0x55, 0x21, 0, 0, 3, 0, 0, 0, 0, 0, 5]);
+  assert.deepEqual(Array.from(context.batteryCommand()).slice(0, 7), [0x55, 0x30, 0xa5, 0x0b, 0x2e, 1, 1]);
+});
+
+test('validação recusa valores fora do configurador e confere só os campos alterados', async () => {
+  const { context } = await renderer();
+  const config = { ...defaultMouseConfig(), reportRate: -1 };
+  assert.equal(context.validateMouseConfig(config, ['lightMode']), null);
+  assert.match(context.validateMouseConfig(config, ['reportRate']), /polling/);
+  assert.match(context.validateMouseConfig({ ...config, dpis: [400, 800, 1600, 2400, 3200, 123] }, ['dpis']), /123/);
+  assert.match(context.validateMouseConfig({ ...config, dpis: [400, 800, 1600, 2400, 3200, 24050] }, ['dpis']), /24050/);
+  assert.match(context.validateMouseConfig({ ...config, lightMode: 9 }, ['lightMode']), /iluminação/);
+  assert.equal(context.validateMouseConfig({ ...config, sleepMinutes: 30 }, ['sleepMinutes']), null);
+});
+
+test('eventos do mouse: bateria com carga, botão de DPI e receptor', async () => {
+  const { context } = await renderer();
+  const event = (bytes) => context.parseMouseReport(bytes);
+  assert.equal(JSON.stringify(event([0xaa, 0xfa, 0, 0, 0, 0, 0, 0, 0xd0, 40, 1])), JSON.stringify({ type: 'battery', battery: 40, charging: true }));
+  assert.equal(JSON.stringify(event([0xaa, 0xfa, 0, 0, 0, 0, 0, 0, 0x01, 3, 2])), JSON.stringify({ type: 'status', dpiIndex: 2, reportRate: 1 }));
+  assert.equal(event([0xaa, 0xfa, 0, 0, 0, 0, 0, 0, 0x01, 9, 2]), null);
+  assert.equal(JSON.stringify(event([0xaa, 0xed, 0, 0, 0, 0, 0, 0, 2, 0])), JSON.stringify({ type: 'online', online: true }));
+  assert.equal(event([0x55, 0x30, 0xa5, 0, 0, 0, 0, 0, 50, 0]), null);
+});
+
+test('ao conectar o app lê firmware e configurações e libera os controles', async () => {
+  const { context, state, nodes } = await renderer();
+  const device = mouse(); state.devices = [device]; await context.listAuthorizedDevices(); await settle();
+  assert.equal(nodes.get('#firmwareText').textContent, '1.0.4');
+  assert.equal(nodes.get('#connectionText').textContent, 'Cabo USB');
+  assert.equal(nodes.get('#mouseSettings').disabled, false);
+  assert.equal(nodes.get('#lightModeSelect').value, '2');
+  assert.equal(nodes.get('#reportRateSelect').disabled, true);
+  const levels = nodes.get('#dpiLevels').children;
+  assert.deepEqual(levels.map((level) => level.children[2].value), ['400', '800', '1600', '2400', '3200', '6400']);
+  assert.equal(levels[1].children[0].checked, true);
+
+  const wireless = await renderer();
+  const dongle = mouse({ vendorId: 0xa8a5 }); wireless.state.devices = [dongle];
+  await wireless.context.listAuthorizedDevices(); await settle();
+  assert.equal(wireless.nodes.get('#connectionText').textContent, 'Receptor 2.4G');
+  assert.equal(wireless.nodes.get('#reportRateSelect').disabled, false);
+});
+
+test('iluminação, polling e DPI são gravados no mouse e conferidos', async () => {
+  const { context, state, nodes } = await renderer();
+  const device = mouse({ vendorId: 0xa8a5 }); state.devices = [device]; await context.listAuthorizedDevices(); await settle();
+  const light = nodes.get('#lightModeSelect'); light.value = '4'; light.emit('change'); await settle();
+  assert.equal(device.config.lightMode, 4);
+  assert.ok(device.reports.some((bytes) => bytes[1] === 0x21 && bytes[10] === 4));
+  assert.equal(nodes.get('#mouseSettingsStatus').textContent, 'Salvo no mouse: Iluminação.');
+
+  const rate = nodes.get('#reportRateSelect'); rate.value = '1'; rate.emit('change'); await settle();
+  assert.equal(device.config.reportRate, 1);
+  assert.equal(device.config.lightMode, 4);
+
+  const levels = nodes.get('#dpiLevels').children;
+  levels[5].children[2].value = '12000';
+  nodes.get('#applyDpiButton').emit('click'); await settle();
+  assert.deepEqual(device.config.dpis, [400, 800, 1600, 2400, 3200, 12000]);
+  assert.equal(device.config.sensorFlag, 53);
+  assert.equal(device.config.wakeupFlag, 1);
+
+  nodes.get('#dpiLevels').children[3].children[0].checked = true;
+  nodes.get('#dpiLevels').children[3].children[0].emit('change'); await settle();
+  assert.equal(device.config.dpiIndex, 3);
+});
+
+test('DPI inválido não é enviado e gravação sem confirmação é avisada', async () => {
+  const { context, state, nodes } = await renderer();
+  const device = mouse({ ignoreWrites: true }); state.devices = [device]; await context.listAuthorizedDevices(); await settle();
+  const writes = () => device.reports.filter((bytes) => bytes[1] === 0x0f).length;
+  nodes.get('#dpiLevels').children[0].children[2].value = '425';
+  nodes.get('#applyDpiButton').emit('click'); await settle();
+  assert.equal(writes(), 0);
+  assert.match(nodes.get('#mouseSettingsStatus').textContent, /DPI inválido: 425/);
+  const sleep = nodes.get('#sleepSelect'); sleep.value = '30'; sleep.emit('change'); await settle();
+  assert.equal(writes(), 1);
+  assert.match(nodes.get('#mouseSettingsStatus').textContent, /não confirmou/);
+});
+
+test('mouse sem resposta mantém os controles bloqueados', async () => {
+  const { context, state, nodes, timeouts } = await renderer();
+  const device = mouse({ silent: true }); state.devices = [device]; await context.listAuthorizedDevices(); await settle();
+  // Versão e leitura de configuração esperam a resposta; a bateria também tem seu temporizador.
+  for (let i = 0; i < 3; i++) { await runTimeouts(timeouts); await settle(); }
+  assert.equal(nodes.get('#mouseSettings').disabled, true);
+  assert.match(nodes.get('#mouseSettingsStatus').textContent, /não respondeu/);
+  assert.equal(device.reports.filter((bytes) => bytes[1] === 0x0f).length, 0);
+});
+
+test('botão de DPI no mouse e receptor atualizam a tela', async () => {
+  const { context, state, nodes } = await renderer();
+  const device = mouse({ vendorId: 0xa8a5 }); state.devices = [device]; await context.listAuthorizedDevices(); await settle();
+  const report = (bytes) => context.handleInputReport({ device, reportId: 0, data: new DataView(new Uint8Array(bytes).buffer) });
+  report([0xaa, 0xfa, 0, 0, 0, 0, 0, 0, 0x01, 5, 2]);
+  const radios = nodes.get('#dpiLevels').children.map((level) => level.children[0].checked);
+  assert.deepEqual(radios, [false, false, false, false, true, false]);
+  assert.equal(nodes.get('#reportRateSelect').value, '1');
+  report([0xaa, 0xed, 0, 0, 0, 0, 0, 0, 0, 0]);
+  assert.equal(nodes.get('#statusText').textContent, 'Mouse desligado');
+  report([0xaa, 0xed, 0, 0, 0, 0, 0, 0, 2, 0]);
+  assert.equal(nodes.get('#statusText').textContent, 'Conectado');
+  assert.equal(device.queries, 2);
+});
+
+test('preferências de alerta são salvas e mudam os avisos e o intervalo', async () => {
+  const storage = {};
+  const first = await renderer({ storage });
+  const low = first.nodes.get('#lowAlertSelect'); low.value = '30'; low.emit('change');
+  const critical = first.nodes.get('#criticalAlertSelect'); critical.value = '15'; critical.emit('change');
+  assert.equal(JSON.parse(storage.preferences).lowAlert, 30);
+  [31, 30, 16, 15].forEach((battery) => first.context.applyBatteryLevel(battery));
+  assert.deepEqual(first.state.alerts, [30, 15]);
+
+  const second = await renderer({ storage });
+  assert.equal(second.nodes.get('#lowAlertSelect').value, '30');
+  assert.equal(second.nodes.get('#criticalAlertSelect').value, '15');
+  const device = mouse(); second.state.devices = [device]; await second.context.listAuthorizedDevices();
+  const [before] = second.timers;
+  const refresh = second.nodes.get('#refreshSelect'); refresh.value = '30'; refresh.emit('change');
+  assert.equal(second.timers.size, 1); assert.notEqual([...second.timers][0], before);
+
+  const full = second.nodes.get('#notifyFullCheckbox'); full.checked = false; full.emit('change');
+  second.context.applyBatteryLevel(99, true); second.context.applyBatteryLevel(100, true);
+  assert.equal(second.state.full, 0);
+});
+
+test('preferências inválidas voltam ao padrão e aviso crítico fica abaixo do baixo', async () => {
+  const { nodes, storage } = await renderer({ storage: { preferences: '{"lowAlert":7,"criticalAlert":15,"refreshMinutes":"x"}' } });
+  assert.equal(nodes.get('#lowAlertSelect').value, '20');
+  assert.equal(nodes.get('#criticalAlertSelect').value, '15');
+  const low = nodes.get('#lowAlertSelect'); low.value = '15'; low.emit('change');
+  assert.equal(nodes.get('#lowAlertSelect').value, '20');
+  assert.equal(storage.preferences.includes('"lowAlert":7'), true);
+  const broken = await renderer({ storage: { preferences: '{nada' } });
+  assert.equal(broken.nodes.get('#refreshSelect').value, '10');
+});
+
+test('lista de seleção aparece com dispositivos e some ao cancelar', async () => {
+  const { context, nodes, state } = await renderer();
+  const card = nodes.get('#devicePickerCard');
+  context.renderDevicePicker([{ deviceId: '1', name: 'AJAZZ', vendorId: 0xa8a4, productId: 0x2255 }]);
+  assert.equal(card.hidden, false);
+  nodes.get('#cancelPickerButton').emit('click'); await settle();
+  assert.equal(card.hidden, true); assert.equal(state.cancelled, 1);
+});
+
