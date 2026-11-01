@@ -35,7 +35,7 @@ Depois de iniciado, o app permanece ativo na bandeja do Windows, perto do relóg
 
 Na seção de preferências, ative “Iniciar com o Windows”. No próximo login, o monitor abre e aguarda a conexão do mouse autorizado; depois de conectado, a janela é ocultada e o monitor permanece na bandeja. O ícone da bandeja permite reabrir o monitor quando necessário.
 
-A caixa reflete a configuração efetiva do Windows e é atualizada ao voltar para a janela. Se a inicialização tiver sido bloqueada no Gerenciador de Tarefas, reative o monitor em **Configurações → Aplicativos → Inicialização**. O arquivo de preferências de versões anteriores não é mais usado para indicar esse estado.
+A caixa reflete a configuração efetiva do Windows e é atualizada ao voltar para a janela. Se a inicialização tiver sido bloqueada no Gerenciador de Tarefas, reative o monitor em **Configurações → Aplicativos → Inicialização**. O arquivo de preferências de versões anteriores não é mais usado para indicar esse estado. Ao abrir, o app troca a entrada de inicialização criada pelas versões até 0.1.3 pela atual, mantendo a escolha que estava ativa, para não abrir duas vezes no login.
 
 A ocultação automática ocorre somente na primeira conexão do início automático. Reabrir o monitor cancela uma ocultação ainda pendente. Abrir o aplicativo novamente traz a instância existente para a frente.
 

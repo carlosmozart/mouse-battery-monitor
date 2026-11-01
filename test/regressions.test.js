@@ -135,7 +135,9 @@ function batteryReport(device, battery, charging) {
   return { device, reportId: 0, data: new DataView(bytes.buffer) };
 }
 
-async function main({ lock = true, hidden = true, packaged = true, notifications = false } = {}) {
+const INSTALLED_EXE = 'C:\\Users\\me\\AppData\\Local\\Programs\\Mouse Battery Monitor\\Mouse Battery Monitor.exe';
+
+async function main({ lock = true, hidden = true, packaged = true, notifications = false, registry = [] } = {}) {
   const app = new EventEmitter();
   const ipcMain = new EventEmitter();
   const handlers = new Map();
@@ -143,15 +145,29 @@ async function main({ lock = true, hidden = true, packaged = true, notifications
   const trays = [];
   const powerMonitor = new EventEmitter();
   const notices = [];
-  const state = { openAtLogin: true, executableWillLaunchAtLogin: true, quits: 0 };
+  const state = { quits: 0, writes: [], registry: new Map(registry) };
+  // Imita o Electron 38 no Windows: o caminho é lido como linha de comando e,
+  // sem aspas, cortado no primeiro espaço.
+  const program = (value) => (value.startsWith('"') ? value.slice(1, value.indexOf('"', 1)) : value.split(' ')[0]);
   Object.assign(app, {
     setAppUserModelId(id) { state.appUserModelId = id; },
     requestSingleInstanceLock: () => lock,
     quit: () => { state.quits++; },
     isReady: () => true, whenReady: () => Promise.resolve(), isPackaged: packaged,
     getAppPath: () => root, getVersion: () => require('../package.json').version,
-    getLoginItemSettings(options) { state.readOptions = options; return state; },
-    setLoginItemSettings(options) { state.writeOptions = options; state.openAtLogin = options.openAtLogin; }
+    getLoginItemSettings(options) {
+      const lookup = program(options.path).toLowerCase();
+      const launchItems = [...state.registry]
+        .filter(([, item]) => item.path.toLowerCase() === lookup)
+        // Como o Electron, devolve só os argumentos que não são opções.
+        .map(([name, item]) => ({ name, path: item.path, args: item.args.filter((arg) => !arg.startsWith('-')), scope: 'user', enabled: item.enabled }));
+      return { openAtLogin: false, executableWillLaunchAtLogin: launchItems.some((item) => item.enabled), launchItems };
+    },
+    setLoginItemSettings(options) {
+      state.writes.push(options);
+      if (options.openAtLogin) state.registry.set(options.name, { path: options.path, args: [...options.args], enabled: options.enabled ?? true });
+      else state.registry.delete(options.name);
+    }
   });
   ipcMain.handle = (name, callback) => handlers.set(name, callback);
   class BrowserWindow extends EventEmitter {
@@ -176,7 +192,7 @@ async function main({ lock = true, hidden = true, packaged = true, notifications
     Menu: { buildFromTemplate: (items) => items }, Notification };
   const context = vm.createContext({
     Buffer, console, __dirname: path.join(root, 'src'),
-    process: { argv: hidden ? ['app', '--hidden'] : ['app'], execPath: 'C:\\app\\monitor.exe', platform: 'win32' },
+    process: { argv: hidden ? ['app', '--hidden'] : ['app'], execPath: INSTALLED_EXE, platform: 'win32' },
     require: (name) => name === 'electron' ? electron : require(name)
   });
   vm.runInContext(source('src/main.js'), context);
@@ -263,21 +279,51 @@ test('histórico é limitado e diagnóstico usa a versão do aplicativo', async 
   assert.ok(!nodes.get('#log').textContent.includes('xxx'));
 });
 
-test('Windows é a fonte da preferência e leitura/gravação usam os mesmos argumentos', async () => {
-  const { context, state } = await main();
-  assert.equal(context.getStartWithWindows(), true);
-  state.executableWillLaunchAtLogin = false;
+test('inicialização é confirmada pela entrada do app mesmo com espaços no caminho', async () => {
+  const { app, context, state } = await main();
+  // Sem aspas o Electron não encontra a entrada: era isso que desmarcava a caixa.
   assert.equal(context.getStartWithWindows(), false);
-  assert.equal(context.setStartWithWindows(true), false);
-  assert.equal(JSON.stringify(state.writeOptions.args), JSON.stringify(state.readOptions.args));
-  assert.equal(state.writeOptions.path, state.readOptions.path);
+  assert.equal(context.setStartWithWindows(true), true);
+  assert.equal(app.getLoginItemSettings({ path: INSTALLED_EXE }).launchItems.length, 0);
+  const entry = state.registry.get('com.mousebatterymonitor.app');
+  assert.equal(entry.path, INSTALLED_EXE); assert.deepEqual(entry.args, ['--hidden']);
+
+  entry.enabled = false;
+  assert.equal(context.getStartWithWindows(), false);
+  entry.enabled = true;
+  // Outra entrada ativa para o mesmo executável não conta como a do app.
+  state.registry.set('outro', { path: INSTALLED_EXE, args: ['--hidden'], enabled: true });
   assert.equal(context.setStartWithWindows(false), false);
+  assert.equal(state.registry.has('com.mousebatterymonitor.app'), false);
 });
 
-test('inicialização em desenvolvimento inclui o caminho do projeto', async () => {
+test('inicialização em desenvolvimento usa entrada própria com o caminho do projeto', async () => {
   const { context, state } = await main({ packaged: false });
-  context.setStartWithWindows(true);
-  assert.deepEqual(Array.from(state.writeOptions.args), [root, '--hidden']);
+  assert.equal(context.setStartWithWindows(true), true);
+  assert.deepEqual(state.registry.get('com.mousebatterymonitor.app.dev').args, [root, '--hidden']);
+  assert.equal(state.registry.has('com.mousebatterymonitor.app'), false);
+  // Entrada de outra cópia do projeto não vale para esta.
+  state.registry.get('com.mousebatterymonitor.app.dev').args = ['C:\\outro-projeto', '--hidden'];
+  assert.equal(context.getStartWithWindows(), false);
+});
+
+test('entrada das versões antigas é migrada sem abrir o app duas vezes no login', async () => {
+  const legacy = (enabled, exe = INSTALLED_EXE) => ['electron.app.Mouse Battery Monitor', { path: exe, args: ['--hidden'], enabled }];
+  const active = await main({ registry: [legacy(true)] });
+  assert.deepEqual([...active.state.registry.keys()], ['com.mousebatterymonitor.app']);
+  assert.equal(active.context.getStartWithWindows(), true);
+
+  const disabled = await main({ registry: [legacy(false)] });
+  assert.equal(disabled.state.registry.size, 0);
+
+  const current = ['com.mousebatterymonitor.app', { path: INSTALLED_EXE, args: ['--hidden'], enabled: false }];
+  const both = await main({ registry: [legacy(true), current] });
+  assert.deepEqual([...both.state.registry.keys()], ['com.mousebatterymonitor.app']);
+  assert.equal(both.context.getStartWithWindows(), false);
+
+  const other = await main({ registry: [legacy(true, 'C:\\outro\\app.exe')] });
+  assert.equal(other.state.registry.has('electron.app.Mouse Battery Monitor'), true);
+  assert.equal(other.state.writes.length, 0);
 });
 
 test('interface reflete bloqueio do Windows e atualiza ao receber foco', async () => {
@@ -413,7 +459,7 @@ test('notificações usam o ID do instalador e o clique abre o monitor', async (
   packaged.notices[0].emit('click');
   assert.equal(packaged.windows[0].shows, 1);
   const dev = await main({ packaged: false });
-  assert.equal(dev.state.appUserModelId, 'C:\\app\\monitor.exe');
+  assert.equal(dev.state.appUserModelId, INSTALLED_EXE);
   dev.ipcMain.emit('low-battery-notification', {}, 15);
   assert.equal(dev.notices.length, 0);
 });

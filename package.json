@@ -1,6 +1,6 @@
 {
   "name": "mouse-battery-app",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "description": "Windows companion app for reading Bluetooth/USB HID mouse battery information.",
   "main": "src/main.js",

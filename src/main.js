@@ -14,6 +14,7 @@ const activeNotifications = new Set();
 const MAX_ACTIVE_NOTIFICATIONS = 5;
 // Igual a build.appId: o Windows associa as notificações ao atalho do instalador.
 const APP_USER_MODEL_ID = 'com.mousebatterymonitor.app';
+const LEGACY_LOGIN_ITEM_NAME = 'electron.app.Mouse Battery Monitor';
 const AJAZZ_VENDOR_IDS = [0xa8a4, 0xa8a5];
 const AJAZZ_PRODUCT_ID = 0x2255;
 const hasInstanceLock = app.requestSingleInstanceLock();
@@ -151,9 +152,20 @@ function showWindow() {
   mainWindow?.focus();
 }
 
+function getLoginItems() {
+  // O Electron separa o caminho nos espaços ("Mouse Battery Monitor.exe") e não
+  // encontra nenhuma entrada; entre aspas ele identifica o programa corretamente.
+  return app.getLoginItemSettings({ path: `"${process.execPath}"` }).launchItems ?? [];
+}
+
 function getStartWithWindows() {
-  const settings = app.getLoginItemSettings(getLoginOptions());
-  return settings.openAtLogin && settings.executableWillLaunchAtLogin;
+  const { name, args } = getLoginOptions();
+  const item = getLoginItems().find((entry) => entry.name === name);
+  // O Electron só devolve os argumentos que não são opções (--hidden fica de fora);
+  // em desenvolvimento isso confere o caminho do projeto.
+  const expectedArgs = args.filter((arg) => !arg.startsWith('-'));
+  // A entrada pode existir desativada no Gerenciador de Tarefas.
+  return Boolean(item?.enabled) && JSON.stringify(Array.from(item.args ?? [])) === JSON.stringify(expectedArgs);
 }
 
 function setStartWithWindows(enabled) {
@@ -167,8 +179,20 @@ function setStartWithWindows(enabled) {
 function getLoginOptions() {
   return {
     path: process.execPath,
-    args: app.isPackaged ? ['--hidden'] : [app.getAppPath(), '--hidden']
+    args: app.isPackaged ? ['--hidden'] : [app.getAppPath(), '--hidden'],
+    // Nome separado em desenvolvimento para não sobrescrever a entrada do app instalado.
+    name: app.isPackaged ? APP_USER_MODEL_ID : `${APP_USER_MODEL_ID}.dev`
   };
+}
+
+// Até a versão 0.1.3 a entrada usava o ID padrão do Electron. Com as duas entradas
+// o app abriria duas vezes no login; a escolha do usuário passa para a entrada atual.
+function migrateLegacyLoginItem() {
+  const items = getLoginItems();
+  const legacy = items.find((item) => item.name === LEGACY_LOGIN_ITEM_NAME);
+  if (!legacy) return;
+  if (legacy.enabled && !items.some((item) => item.name === getLoginOptions().name)) setStartWithWindows(true);
+  app.setLoginItemSettings({ openAtLogin: false, name: LEGACY_LOGIN_ITEM_NAME, path: process.execPath });
 }
 
 async function createTray() {
@@ -285,6 +309,12 @@ if (hasInstanceLock) app.whenReady().then(async () => {
   ipcMain.handle('get-start-with-windows', () => getStartWithWindows());
   ipcMain.handle('set-start-with-windows', (_event, enabled) => setStartWithWindows(Boolean(enabled)));
   ipcMain.handle('get-app-version', () => app.getVersion());
+
+  try {
+    migrateLegacyLoginItem();
+  } catch (error) {
+    console.error('Não foi possível migrar a inicialização com o Windows.', error);
+  }
 
   createWindow();
   await createTray();
